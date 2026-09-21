@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+DATAS/.~lock.*
+
+# Fichier de déploiement (aide-mémoire personnel, exclu de Git)
+DEPLOY.md
