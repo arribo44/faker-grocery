@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.5.0] - 2026-10-31
 
 ### Added
 - **Popularity-weighted products**: `product()`, `product_record()`, `grocery_item()` and `grocery_list()` now pick products in proportion to how often they were ordered in the Instacart data (~32M order lines), so baskets contain bananas, milk and strawberries far more often than niche items. `weighted=False` restores a uniform pick.

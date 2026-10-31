@@ -22,7 +22,7 @@ import os
 
 from faker.providers import BaseProvider
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 _DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "grocery_data.json")
 _data_cache = None
