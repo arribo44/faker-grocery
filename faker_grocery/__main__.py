@@ -47,7 +47,7 @@ def demo(locale):
     print(f"  {fake.product_record()}")
 
     print("\n--- Prices / quantities / units ---")
-    print(f"  price: {fake.price()}")
+    print(f"  price: {fake.price()} {fake.grocery_currency()}")
     print(f"  quantity: {fake.quantity()}")
     print(f"  unit: {fake.unit()}")
 
@@ -59,12 +59,12 @@ def demo(locale):
     print(f"  Shopping trip: {shopping_list['shopping_datetime']}")
     for item in shopping_list["items"]:
         print(f"  {item['quantity']} {item['unit']} x {item['product']} "
-              f"({item['aisle']} / {item['department']}): {item['total_price']}")
-    print(f"  Family size: {shopping_list['family_size']}  Total: {shopping_list['total']}")
+              f"({item['aisle']} / {item['department']}): {item['total_price']} {shopping_list['currency']}")
+    print(f"  Family size: {shopping_list['family_size']}  Total: {shopping_list['total']} {shopping_list['currency']}")
 
     print("\n--- Grocery list for a family of 4 ---")
     shopping_list = fake.grocery_list(family_size=4)
-    print(f"  Item count: {shopping_list['item_count']}  Total: {shopping_list['total']}")
+    print(f"  Item count: {shopping_list['item_count']}  Total: {shopping_list['total']} {shopping_list['currency']}")
 
 
 def main():

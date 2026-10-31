@@ -472,5 +472,86 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertIn(fake["en_US"].department_name(16), {self.provider.departments["16"]["en"]})
 
 
+    # -- currency -----------------------------------------------------------------
+
+    def _faker(self, locale):
+        fake = Faker(locale)
+        fake.add_provider(GroceryStoreProvider)
+        return fake
+
+    def test_currency_follows_locale_country(self):
+        expected = {"fr_FR": "EUR", "de_DE": "EUR", "en_US": "USD", "en_GB": "GBP",
+                    "fr_CA": "CAD", "fr_CH": "CHF", "ja_JP": "JPY"}
+        for locale, currency in expected.items():
+            self.assertEqual(self._faker(locale).grocery_currency(), currency, msg=locale)
+
+    def test_unlisted_country_falls_back_to_base_currency(self):
+        self.assertEqual(self._faker("en_PH").grocery_currency(), "EUR")
+
+    def test_grocery_currency_symbol(self):
+        self.assertEqual(self.fake.grocery_currency(symbol=True), "€")
+        self.assertEqual(self._faker("en_GB").grocery_currency(symbol=True), "£")
+
+    def test_faker_currency_code_is_not_shadowed(self):
+        # Faker's own currency_code() returns a random currency; the provider
+        # must not override it with its fixed locale currency.
+        codes = {self.fake.currency_code() for _ in range(50)}
+        self.assertGreater(len(codes), 1)
+
+    def test_prices_are_converted_from_the_eur_catalog(self):
+        fake = self._faker("en_US")
+        rate = self.provider._data["currencies"]["USD"]["rate"]
+        base_price_col = self.provider._data["base_price_col"]
+        for _ in range(30):
+            record = fake.product_record()
+            eur_base = self.provider._data["by_id"][record["id"]][base_price_col]
+            self.assertEqual(record["currency"], "USD")
+            self.assertEqual(record["base_price"], round(eur_base * rate, 2))
+            self.assertGreaterEqual(record["price"], round(record["base_price"] * 0.95, 2) - 0.01)
+            self.assertLessEqual(record["price"], round(record["base_price"] * 1.05, 2) + 0.01)
+
+    def test_department_price_range_is_converted(self):
+        fake = self._faker("en_GB")
+        rate = self.provider._data["currencies"]["GBP"]["rate"]
+        low, high = self.provider._data["price_ranges"]["5"]  # alcohol, 4-40 EUR
+        for _ in range(30):
+            price = fake.price(department=5)
+            self.assertGreaterEqual(price, round(low * rate, 2))
+            self.assertLessEqual(price, round(high * rate, 2))
+
+    def test_custom_price_range_is_not_converted(self):
+        fake = self._faker("ja_JP")
+        for _ in range(30):
+            price = fake.price(min_price=100, max_price=200)
+            self.assertGreaterEqual(price, 100)
+            self.assertLessEqual(price, 200)
+
+    def test_zero_decimal_currency_gives_whole_prices(self):
+        fake = self._faker("ja_JP")
+        shopping_list = fake.grocery_list()
+        self.assertEqual(shopping_list["currency"], "JPY")
+        self.assertIsInstance(shopping_list["total"], int)
+        for item in shopping_list["items"]:
+            self.assertIsInstance(item["unit_price"], int)
+            self.assertEqual(item["total_price"], item["quantity"] * item["unit_price"])
+        self.assertEqual(shopping_list["total"], sum(i["total_price"] for i in shopping_list["items"]))
+
+    def test_currency_field_in_items_and_lists(self):
+        self.assertEqual(self.fake.grocery_item()["currency"], "EUR")
+        self.assertEqual(self.fake.grocery_list(min_items=1, max_items=1)["currency"], "EUR")
+
+    def test_set_grocery_currency_overrides_and_resets(self):
+        fake = self._faker("fr_FR")
+        fake.set_grocery_currency("usd")
+        self.assertEqual(fake.grocery_currency(), "USD")
+        self.assertEqual(fake.grocery_item()["currency"], "USD")
+        fake.set_grocery_currency(None)
+        self.assertEqual(fake.grocery_currency(), "EUR")
+
+    def test_set_unsupported_currency_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.set_grocery_currency("XYZ")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,8 @@ def _build_index(raw):
         "departments": raw["departments"],
         "aisles": raw["aisles"],
         "price_ranges": raw["price_ranges"],
+        "currencies": raw["currencies"],
+        "country_currencies": raw["country_currencies"],
         "unit_labels": raw["unit_labels"],
         "department_units": raw["department_units"],
         "products": products,
@@ -113,6 +115,7 @@ class GroceryStoreProvider(BaseProvider):
         data = _load_data()
         lang = self._provider_locale.split("_")[0].lower()
         self._lang = lang if lang in data["languages"] else data["meta"]["default_language"]
+        self.set_grocery_currency(None)
 
     @property
     def locale(self):
@@ -123,6 +126,11 @@ class GroceryStoreProvider(BaseProvider):
     def language(self):
         """The catalog language actually used ('en' or 'fr'), resolved from the locale."""
         return self._lang
+
+    @property
+    def currency(self):
+        """The ISO 4217 code of the currency prices are generated in (e.g. 'EUR')."""
+        return self._currency
 
     @property
     def _data(self):
@@ -258,7 +266,7 @@ class GroceryStoreProvider(BaseProvider):
 
     def _row_to_record(self, row):
         product_id, aisle_id, department_id = row[0], row[1], row[2]
-        base_price = row[self._data["base_price_col"]]
+        base_price = self._convert_price(row[self._data["base_price_col"]])
         return {
             "id": product_id,
             "name": row[self._data["name_col"][self._lang]],
@@ -268,6 +276,7 @@ class GroceryStoreProvider(BaseProvider):
             "department": self.departments[str(department_id)][self._lang],
             "base_price": base_price,
             "price": self._jitter_price(base_price),
+            "currency": self._currency,
         }
 
     def product_name(self, product_id):
@@ -281,6 +290,44 @@ class GroceryStoreProvider(BaseProvider):
             raise ValueError(f"Unknown product id: {product_id!r}")
         return row
 
+    # -- currency -------------------------------------------------------------
+
+    def set_grocery_currency(self, currency=None):
+        """Set the currency prices are generated in (an ISO 4217 code such as
+        'USD'), or reset it to the locale's default with `None`.
+
+        By default the currency follows the country of the Faker locale
+        ('en_US' -> USD, 'en_GB' -> GBP, 'fr_CA' -> CAD...), falling back to
+        EUR, the catalog's base currency. Prices are converted from EUR with
+        fixed approximate rates, not live exchange rates."""
+        data = self._data
+        if currency is None:
+            country = self._provider_locale.split("_")[-1].upper()
+            currency = data["country_currencies"].get(country, data["meta"]["base_currency"])
+        code = str(currency).upper()
+        if code not in data["currencies"]:
+            raise ValueError(f"Unsupported currency: {currency!r} (supported: {sorted(data['currencies'])})")
+        self._currency = code
+        self._rate = data["currencies"][code]["rate"]
+        self._decimals = data["currencies"][code]["decimals"]
+
+    def grocery_currency(self, symbol=False):
+        """Return the currency prices are generated in: its ISO 4217 code
+        (e.g. 'EUR'), or its symbol (e.g. '€') if `symbol` is true.
+
+        Not named `currency_code` so as not to shadow Faker's own
+        `currency_code()` (a random currency, unrelated to this provider)."""
+        if symbol:
+            return self._data["currencies"][self._currency]["symbol"]
+        return self._currency
+
+    def _round_price(self, amount):
+        return round(amount, self._decimals) if self._decimals else int(round(amount))
+
+    def _convert_price(self, eur_amount):
+        """Convert a catalog (EUR) amount to the current currency."""
+        return self._round_price(eur_amount * self._rate)
+
     # -- price / quantity / unit ---------------------------------------------
 
     def _jitter_price(self, base_price, variation=0.05):
@@ -288,21 +335,24 @@ class GroceryStoreProvider(BaseProvider):
         price, so the same article's 'probable price' fluctuates a little
         each time it is priced, like real shelf prices do from day to day."""
         factor = 1 + self.generator.random.uniform(-variation, variation)
-        return round(max(0.01, base_price * factor), 2)
+        smallest = 10 ** -self._decimals
+        return self._round_price(max(smallest, base_price * factor))
 
     def price(self, product=None, department=None, min_price=None, max_price=None):
-        """Return a price (float, 2 decimals).
+        """Return a price in the current currency (see `grocery_currency`),
+        rounded to its minor unit (2 decimals, or a whole number for e.g. JPY).
 
         - If `product` (a product id) is given, returns that product's
           catalog base price jittered by +/-5% (its "probable price" today).
         - Elif a custom (min_price, max_price) range is given, returns a
-          uniform random price in that range (both bounds are required).
+          uniform random price in that range (both bounds are required, and
+          taken as already in the current currency).
         - Otherwise returns a uniform random price within the given
           department's typical range (or a random department's range if
           none is given)."""
         if product is not None:
             row = self._find_product_row(product)
-            return self._jitter_price(row[self._data["base_price_col"]])
+            return self._jitter_price(self._convert_price(row[self._data["base_price_col"]]))
         if (min_price is None) != (max_price is None):
             raise ValueError("min_price and max_price must be given together")
         if min_price is not None and min_price > max_price:
@@ -311,8 +361,8 @@ class GroceryStoreProvider(BaseProvider):
             dept_id = self._resolve_department_id(department)
             if dept_id is None:
                 dept_id = int(self.random_element(list(self._data["price_ranges"].keys())))
-            min_price, max_price = self._data["price_ranges"][str(dept_id)]
-        return round(self.generator.random.uniform(min_price, max_price), 2)
+            min_price, max_price = (p * self._rate for p in self._data["price_ranges"][str(dept_id)])
+        return self._round_price(self.generator.random.uniform(min_price, max_price))
 
     def quantity(self, max_quantity=10):
         """Return a random quantity for a shopping list item (1 to `max_quantity`)."""
@@ -360,7 +410,8 @@ class GroceryStoreProvider(BaseProvider):
             "quantity": quantity,
             "unit": unit,
             "unit_price": unit_price,
-            "total_price": round(quantity * unit_price, 2),
+            "total_price": self._round_price(quantity * unit_price),
+            "currency": self._currency,
         }
 
     def shopping_datetime(self, date=None, open_hour=8, close_hour=20):
@@ -387,7 +438,7 @@ class GroceryStoreProvider(BaseProvider):
     def grocery_list(self, min_items=None, max_items=None, family_size=2, department=None,
                       with_datetime=False, date=None):
         """Return a randomized shopping basket as a dict with 'items',
-        'item_count', 'family_size' and 'total'.
+        'item_count', 'family_size', 'total' and 'currency'.
 
         - `family_size` (default 2, a couple) scales the default item-count
           range and how much of each item is bought, when `min_items` /
@@ -413,12 +464,13 @@ class GroceryStoreProvider(BaseProvider):
             self.grocery_item(department=dept_id, family_size=family_size)
             for _ in range(item_count)
         ]
-        total = round(sum(item["total_price"] for item in items), 2)
+        total = self._round_price(sum(item["total_price"] for item in items))
         result = {
             "items": items,
             "item_count": item_count,
             "family_size": family_size,
             "total": total,
+            "currency": self._currency,
         }
         if with_datetime or date is not None:
             result["shopping_datetime"] = self.shopping_datetime(date=date)

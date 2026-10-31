@@ -86,6 +86,9 @@ fake.product_record()
 #     'aisle': 'yaourt',
 #     'department_id': 16,
 #     'department': 'produits laitiers et œufs',
+#     'base_price': 2.10,
+#     'price': 2.04,
+#     'currency': 'EUR',
 # }
 
 fake.product_name(12345)                # look up a specific product id
@@ -118,6 +121,33 @@ fake.unit(department=7)                 # restricted to units plausible for that
                                          # "kg"/"botte" for produce - not "9 bottle x Bread")
 ```
 
+### 💱 Currency
+
+Prices are generated in the currency of the locale's country: `en_US` → USD,
+`en_GB` → GBP, `fr_CA` → CAD, `fr_CH` → CHF, `ja_JP` → JPY, etc. Eurozone
+countries, and any country not in the list, use EUR (the catalog's base
+currency). Prices are converted from EUR with **fixed approximate rates**
+(not live exchange rates), and rounded to the currency's minor unit (whole
+numbers for JPY/HUF). Every priced dict carries a `currency` field.
+
+```python
+fake = Faker("en_US")
+fake.add_provider(GroceryStoreProvider)
+
+fake.grocery_currency()                 # "USD"
+fake.grocery_currency(symbol=True)      # "$"
+fake.product_record()["currency"]       # "USD"
+
+fake.set_grocery_currency("GBP")        # override the locale's currency
+fake.set_grocery_currency(None)         # back to the locale's default
+```
+
+`price(min_price=..., max_price=...)` takes its bounds as already in the
+current currency. The method is named `grocery_currency()` rather than
+`currency_code()` so it doesn't shadow Faker's own `currency_code()`.
+Supported currencies: EUR, USD, GBP, CHF, CAD, AUD, NZD, SEK, NOK, DKK, PLN,
+CZK, HUF, JPY, INR, BRL, MXN.
+
 ### 📝 Grocery items & shopping lists
 
 ```python
@@ -131,6 +161,7 @@ fake.grocery_item()
 #     'unit': 'pot',                # always plausible for the product's department
 #     'unit_price': 2.15,           # base_price jittered +/-5%
 #     'total_price': 6.45,
+#     'currency': 'EUR',
 # }
 
 # family_size defaults to 2 (a couple). It scales the default item-count
@@ -141,6 +172,7 @@ shopping_list = fake.grocery_list()
 #     'item_count': 9,
 #     'family_size': 2,
 #     'total': 42.31,
+#     'currency': 'EUR',
 # }
 
 fake.grocery_list(family_size=5)                       # bigger default basket
@@ -181,10 +213,12 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
 - `products`: compact rows `[id, aisle_id, department_id, base_price, name_<lang0>, name_<lang1>, ...]`
-- `price_ranges`: `{department_id: [min_price, max_price]}`
+- `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
+- `currencies`: `{code: {symbol, rate, decimals}}` - fixed approximate EUR -> currency rates
+- `country_currencies`: `{country_code: currency_code}` - default currency per locale country (unlisted countries use EUR)
 - `unit_labels`: `{unit_key: {language: label}}` (e.g. `"bottle": {"en": "bottle", "fr": "bouteille"}`)
 - `department_units`: `{department_id: [unit_key, ...]}` - which units are plausible for each department, so a generated item's unit always matches what the product actually is (no "9 bottle x Bread")
-- `meta`: supported/default/planned languages, source, field layout
+- `meta`: supported/default/planned languages, base currency, source, field layout
 
 > `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`) is **not** shipped in the installed package - only `grocery_data.json` is (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
 

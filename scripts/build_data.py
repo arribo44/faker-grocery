@@ -148,6 +148,57 @@ DEPARTMENT_UNITS = {
 }
 
 
+# Currency the catalog prices (PRICE_RANGES and every base_price) are
+# expressed in.
+BASE_CURRENCY = "EUR"
+
+# Currencies prices can be converted to. `rate` is a fixed, approximate
+# EUR -> currency conversion factor (deliberately not a live exchange rate:
+# the data must stay stable and offline), `decimals` the number of minor
+# units prices are rounded to.
+CURRENCIES = {
+    "EUR": {"symbol": "€", "rate": 1.0, "decimals": 2},
+    "USD": {"symbol": "$", "rate": 1.1, "decimals": 2},
+    "GBP": {"symbol": "£", "rate": 0.85, "decimals": 2},
+    "CHF": {"symbol": "CHF", "rate": 0.95, "decimals": 2},
+    "CAD": {"symbol": "$", "rate": 1.5, "decimals": 2},
+    "AUD": {"symbol": "$", "rate": 1.65, "decimals": 2},
+    "NZD": {"symbol": "$", "rate": 1.8, "decimals": 2},
+    "SEK": {"symbol": "kr", "rate": 11.5, "decimals": 2},
+    "NOK": {"symbol": "kr", "rate": 11.7, "decimals": 2},
+    "DKK": {"symbol": "kr", "rate": 7.46, "decimals": 2},
+    "PLN": {"symbol": "zł", "rate": 4.3, "decimals": 2},
+    "CZK": {"symbol": "Kč", "rate": 25.0, "decimals": 2},
+    "HUF": {"symbol": "Ft", "rate": 400.0, "decimals": 0},
+    "JPY": {"symbol": "¥", "rate": 160.0, "decimals": 0},
+    "INR": {"symbol": "₹", "rate": 92.0, "decimals": 2},
+    "BRL": {"symbol": "R$", "rate": 6.0, "decimals": 2},
+    "MXN": {"symbol": "$", "rate": 20.0, "decimals": 2},
+}
+
+# Default currency for the country part of a Faker locale (e.g. "US" in
+# "en_US"). Countries not listed here (including every eurozone country)
+# use BASE_CURRENCY.
+COUNTRY_CURRENCIES = {
+    "US": "USD",
+    "GB": "GBP",
+    "CH": "CHF",
+    "CA": "CAD",
+    "AU": "AUD",
+    "NZ": "NZD",
+    "SE": "SEK",
+    "NO": "NOK",
+    "DK": "DKK",
+    "PL": "PLN",
+    "CZ": "CZK",
+    "HU": "HUF",
+    "JP": "JPY",
+    "IN": "INR",
+    "BR": "BRL",
+    "MX": "MXN",
+}
+
+
 def base_price_for(product_id, department_id):
     """Deterministically derive a stable 'probable price' for a product from
     its department's typical price range, skewed towards the cheaper end
@@ -221,11 +272,15 @@ def main():
     for dept_id, keys in department_units.items():
         unknown = set(keys) - set(unit_labels)
         assert not unknown, f"department {dept_id} references unknown unit keys: {unknown}"
+    assert BASE_CURRENCY in CURRENCIES and CURRENCIES[BASE_CURRENCY]["rate"] == 1.0
+    unknown = set(COUNTRY_CURRENCIES.values()) - set(CURRENCIES)
+    assert not unknown, f"COUNTRY_CURRENCIES references unknown currencies: {unknown}"
 
     data = {
         "meta": {
             "languages": languages,
             "default_language": SOURCE_LANG,
+            "base_currency": BASE_CURRENCY,
             "planned_languages": PLANNED_LANGUAGES,
             "source": "Instacart Market Basket Analysis dataset (aisles.csv, departments.csv, products.csv)",
             "product_count": len(products_compact),
@@ -235,6 +290,8 @@ def main():
         "departments": departments,
         "aisles": aisles,
         "price_ranges": price_ranges,
+        "currencies": CURRENCIES,
+        "country_currencies": COUNTRY_CURRENCIES,
         "unit_labels": unit_labels,
         "department_units": department_units,
         "products": products_compact,

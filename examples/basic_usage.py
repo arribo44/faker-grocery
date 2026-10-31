@@ -55,14 +55,14 @@ def demo_locale(locale_name):
               f"{item['unit_price']:.2f} x {item['quantity']} = {item['total_price']:.2f}")
     print(f"\nFamily size: {shopping_list['family_size']}")
     print(f"Item count: {shopping_list['item_count']}")
-    print(f"Total: {shopping_list['total']:.2f}")
+    print(f"Total: {shopping_list['total']:.2f} {shopping_list['currency']}")
 
     print("\n--- Shopping list for a family of 5, with a shopping date/time ---")
     shopping_list = fake.grocery_list(family_size=5, with_datetime=True)
     print(f"Shopping trip: {shopping_list['shopping_datetime']}")
     for item in shopping_list["items"]:
         print(f"  - {item['quantity']} {item['unit']} x {item['product']}: {item['total_price']:.2f}")
-    print(f"Total: {shopping_list['total']:.2f}")
+    print(f"Total: {shopping_list['total']:.2f} {shopping_list['currency']}")
 
     print("\n--- Shopping list restricted to one department ---")
     department = fake.department()
@@ -70,7 +70,7 @@ def demo_locale(locale_name):
     print(f"Department: {department}")
     for item in shopping_list["items"]:
         print(f"  - {item['quantity']} {item['unit']} x {item['product']}: {item['total_price']:.2f}")
-    print(f"Total: {shopping_list['total']:.2f}")
+    print(f"Total: {shopping_list['total']:.2f} {shopping_list['currency']}")
 
     print("\n--- Same product priced twice: base_price vs jittered price (+/-5%) ---")
     record = fake.product_record()

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Currency support**: prices are generated in the currency of the locale's country (`en_US` -> USD, `en_GB` -> GBP, `fr_CA` -> CAD, `ja_JP` -> JPY...; eurozone and unlisted countries -> EUR), converted from the EUR catalog with fixed approximate rates and rounded to the currency's minor unit (whole numbers for JPY/HUF). 17 currencies supported.
+  - `product_record()`, `grocery_item()` and `grocery_list()` results gained a `currency` field.
+  - New `grocery_currency(symbol=False)` (named so as not to shadow Faker's own `currency_code()`) and `set_grocery_currency(code)` / `set_grocery_currency(None)` to override or reset the currency; `GroceryStoreProvider.currency` property.
+  - New `currencies` and `country_currencies` tables and `meta.base_currency` in `grocery_data.json`, built from `scripts/build_data.py`.
+- GitHub Actions CI: ruff, pytest on Python 3.9-3.14 plus Faker 20.0.0, package build check.
+- `dev` extra (`pytest`, `ruff`, `build`) and a pinned ruff rule set.
+- 23 new tests (60 -> 83): argument validation, currency, seed reproducibility, multi-locale usage.
+- README: multi-locale usage (`fake[locale].add_provider(...)`) and error behavior.
+- README: "Data source & license" section (original Instacart source, CC0 Kaggle re-upload actually used, MIT scope limited to the code).
+
 ### Fixed
 - `price(min_price=...)` (or `max_price=...`) alone silently ignored the given bound and returned a price from a department range instead; passing only one bound, or `min_price > max_price`, now raises `ValueError`.
 - `shopping_datetime(open_hour=20, close_hour=8)` returned a time outside opening hours; opening hours are now validated (`0 <= open_hour < close_hour <= 24`).
@@ -23,13 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `grocery_data.json` is written without indentation (8.8 MB -> 4.2 MB, same content); the wheel shrinks from 1.9 MB to 1.6 MB.
 - Packaging moved from `setup.py` to `pyproject.toml`; the version is now read from `faker_grocery.__version__` only. `requires-python` raised from `>=3.7` to `>=3.9` (Faker 20+ already required 3.8+), classifiers now list 3.9-3.14.
 - The private Faker locale lookup is isolated in `_generator_locale()`.
-
-### Added
-- GitHub Actions CI: ruff, pytest on Python 3.9-3.14 plus Faker 20.0.0, package build check.
-- `dev` extra (`pytest`, `ruff`, `build`) and a pinned ruff rule set.
-- 12 new tests (60 -> 72): argument validation, seed reproducibility, multi-locale usage.
-- README: multi-locale usage (`fake[locale].add_provider(...)`) and error behavior.
-- README: "Data source & license" section (original Instacart source, CC0 Kaggle re-upload actually used, MIT scope limited to the code).
 
 ---
 
