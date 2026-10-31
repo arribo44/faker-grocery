@@ -23,7 +23,7 @@ Product names in `fr` are translated word-by-word from the source English names 
 
 ## 📦 Installation
 
-Requires Python 3.9+ and Faker 20+.
+Requires Python 3.10+ and Faker 20+.
 
 ```bash
 cd faker_grocery
@@ -245,7 +245,7 @@ ruff check .
 ```
 
 CI (`.github/workflows/ci.yml`) runs the linter, the test suite on Python
-3.9-3.14 (plus the oldest supported Faker, 20.0.0) and a package build.
+3.10-3.14 (plus the oldest supported Faker, 20.0.0) and a package build.
 
 ---
 

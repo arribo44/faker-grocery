@@ -11,14 +11,13 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "jctranc" }]
 keywords = ["faker", "grocery", "supermarket", "hypermarket", "test data"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = ["faker>=20.0.0"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Environment :: Console",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -49,7 +48,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 # Explicit rule set so CI doesn't change behaviour when ruff's defaults do.

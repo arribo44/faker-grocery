@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `product_record()`, `grocery_item()` and `grocery_list()` results gained a `currency` field.
   - New `grocery_currency(symbol=False)` (named so as not to shadow Faker's own `currency_code()`) and `set_grocery_currency(code)` / `set_grocery_currency(None)` to override or reset the currency; `GroceryStoreProvider.currency` property.
   - New `currencies` and `country_currencies` tables and `meta.base_currency` in `grocery_data.json`, built from `scripts/build_data.py`.
-- GitHub Actions CI: ruff, pytest on Python 3.9-3.14 plus Faker 20.0.0, package build check.
+- GitHub Actions CI: ruff, pytest on Python 3.10-3.14 plus Faker 20.0.0, package build check.
 - `dev` extra (`pytest`, `ruff`, `build`) and a pinned ruff rule set.
 - 23 new tests (60 -> 83): argument validation, currency, seed reproducibility, multi-locale usage.
 - README: multi-locale usage (`fake[locale].add_provider(...)`) and error behavior.
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Performance**: random product picking uses `random.choice` instead of Faker's `random_element` (which scanned the whole ~50k-row catalog on every call), and product id lookups use an index instead of a linear scan. `product()` is ~190x faster, `grocery_list()` ~60x, `price(product=...)` / `product_name()` ~1000x. Output stays reproducible with `Faker.seed()`, **but a given seed now produces different values than in 0.3.1**.
 - `grocery_list(department=...)` resolves the department once instead of once per item, and fails fast on an unknown department.
 - `grocery_data.json` is written without indentation (8.8 MB -> 4.2 MB, same content); the wheel shrinks from 1.9 MB to 1.6 MB.
-- Packaging moved from `setup.py` to `pyproject.toml`; the version is now read from `faker_grocery.__version__` only. `requires-python` raised from `>=3.7` to `>=3.9` (Faker 20+ already required 3.8+), classifiers now list 3.9-3.14.
+- Packaging moved from `setup.py` to `pyproject.toml`; the version is now read from `faker_grocery.__version__` only. `requires-python` raised from `>=3.7` to `>=3.10` (Python 3.9 is end-of-life and current Faker releases require 3.10+), classifiers now list 3.10-3.14.
 - The private Faker locale lookup is isolated in `_generator_locale()`.
 
 ---
