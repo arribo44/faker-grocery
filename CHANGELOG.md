@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.6.0] - 2026-10-31
 
 ### Added
 - **Fixed unit per product, chosen per aisle**: every product now has one unit, fixed at build time among the units plausible for its aisle (new `AISLE_UNITS` table, 134 aisles: milk by the litre or bottle, spices in jars, canned goods in food cans, meat counter by kg/g...). The same product is always sold the same way; `product_record()` gained `unit` and `price_per` fields.
