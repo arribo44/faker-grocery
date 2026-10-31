@@ -9,7 +9,7 @@ import unittest
 
 from faker import Faker
 
-from faker_grocery import GroceryStoreProvider
+from faker_grocery import GroceryStoreProvider, _ensure_language
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -47,8 +47,45 @@ class TestTranslationHelpers(unittest.TestCase):
 
     def test_no_placeholder_leaks_into_the_catalog(self):
         provider = GroceryStoreProvider(Faker())
-        name_col = provider._data["name_col"]["fr"]
-        self.assertFalse([row for row in provider._data["products"] if "qxphrase" in row[name_col].lower()])
+        for lang in provider._data["languages"]:
+            _ensure_language(lang)
+            name_col = provider._data["name_col"][lang]
+            leaks = [row for row in provider._data["products"] if "qxphrase" in row[name_col].lower()]
+            self.assertFalse(leaks, msg=lang)
+
+    def test_reorder_can_be_disabled(self):
+        # German puts the noun last, like English: no reordering.
+        self.assertEqual(fallback_translation("White Balsamic Vinegar", WORD_DICT, PHRASES, reorder=False),
+                         "Blanc Balsamique Vinaigre")
+
+
+class TestLanguageFiles(unittest.TestCase):
+    LANGS = ["fr", "it", "es", "pt", "de"]
+
+    def test_every_language_has_complete_translation_files(self):
+        fr_words = load_json(os.path.join(TRANSLATIONS_DIR, "word_dict_fr.json"))
+        fr_phrases = load_json(os.path.join(TRANSLATIONS_DIR, "phrases_fr.json"))
+        for lang in self.LANGS:
+            departments = load_json(os.path.join(TRANSLATIONS_DIR, f"departments_{lang}.json"))
+            aisles = load_json(os.path.join(TRANSLATIONS_DIR, f"aisles_{lang}.json"))
+            words = load_json(os.path.join(TRANSLATIONS_DIR, f"word_dict_{lang}.json"))
+            phrases = load_json(os.path.join(TRANSLATIONS_DIR, f"phrases_{lang}.json"))
+            self.assertEqual(set(departments), {str(i) for i in range(1, 22)}, msg=lang)
+            self.assertEqual(set(aisles), {str(i) for i in range(1, 135)}, msg=lang)
+            self.assertEqual(set(words), set(fr_words), msg=lang)
+            self.assertEqual(set(phrases), set(fr_phrases), msg=lang)
+            for table in (departments, aisles, words, phrases):
+                self.assertTrue(all(value.strip() for value in table.values()), msg=lang)
+
+    def test_names_files_are_parallel_to_the_products(self):
+        provider = GroceryStoreProvider(Faker())
+        data = provider._data
+        for lang in self.LANGS:
+            path = os.path.join(ROOT, "faker_grocery", "data", data["meta"]["name_files"][lang])
+            with open(path, encoding="utf-8") as f:
+                names = json.load(f)
+            self.assertEqual(len(names), len(data["products"]), msg=lang)
+            self.assertTrue(all(name.strip() for name in names), msg=lang)
 
 
 class TestCuratedFrenchNames(unittest.TestCase):

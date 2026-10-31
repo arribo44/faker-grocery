@@ -19,6 +19,7 @@ import datetime as _datetime
 import itertools
 import json
 import os
+import threading
 import warnings
 from typing import Any, NotRequired, TypedDict
 
@@ -26,8 +27,10 @@ from faker.providers import BaseProvider
 
 __version__ = "0.7.0"
 
-_DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "grocery_data.json")
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+_DATA_PATH = os.path.join(_DATA_DIR, "grocery_data.json")
 _data_cache: dict[str, Any] | None = None
+_language_lock = threading.Lock()
 
 # An id (int or numeric string) or a localized name, as accepted by the
 # `department=` / `aisle=` filters.
@@ -94,6 +97,27 @@ def _load_data() -> dict[str, Any]:
     return _data_cache
 
 
+def _ensure_language(lang: str) -> None:
+    """Load the product names of `lang` (names_<lang>.json, a list parallel
+    to the products) on first use, appending them as a new column to every
+    product row. Languages nobody asks for are never loaded."""
+    data = _load_data()
+    if lang in data["name_col"]:
+        return
+    with _language_lock:
+        if lang in data["name_col"]:
+            return
+        with open(os.path.join(_DATA_DIR, data["meta"]["name_files"][lang]), encoding="utf-8") as f:
+            names = json.load(f)
+        products = data["products"]
+        if len(names) != len(products):
+            raise RuntimeError(f"names_{lang}.json has {len(names)} names for {len(products)} products")
+        column = len(products[0]) if products else 0
+        for row, name in zip(products, names, strict=True):
+            row.append(name)
+        data["name_col"][lang] = column
+
+
 def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     languages = raw["meta"]["languages"]
     # products rows are [id, aisle_id, department_id, base_price, order_count, unit, name_<lang0>, ...]
@@ -101,7 +125,9 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     base_price_col = fields.index("base_price")
     order_count_col = fields.index("order_count")
     unit_col = fields.index("unit")
-    name_col = {lang: fields.index(f"name_{lang}") for lang in languages}
+    # Only the source language is in the main file; the others are added by
+    # _ensure_language() on first use.
+    name_col = {lang: fields.index(f"name_{lang}") for lang in languages if f"name_{lang}" in fields}
 
     products = raw["products"]
 
@@ -192,6 +218,7 @@ class GroceryStoreProvider(BaseProvider):
         data = _load_data()
         lang = self._provider_locale.split("_")[0].lower()
         self._lang = lang if lang in data["languages"] else data["meta"]["default_language"]
+        _ensure_language(self._lang)
         self._country = self._provider_locale.split("_")[-1].upper()
         self.set_grocery_currency(None)
         self.set_grocery_shopping_pattern(None)

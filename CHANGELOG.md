@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Italian, Spanish, Portuguese and German** (`it`, `es`, `pt`, `de`): hand-translated department and aisle names, unit labels, and automatic product name translation (858-word dictionaries and 88-expression tables per language, word-order reversal for the Romance languages). Locales such as `it_IT`, `es_ES`, `es_MX`, `pt_PT`, `pt_BR`, `de_DE`, `de_AT`, `de_CH` now get localized data instead of the English fallback.
+- 5 new tests (137 -> 142): translation files completeness, per-language names files, localized departments and units in every language.
+
+### Changed
+- **Translated product names moved to one file per language** (`faker_grocery/data/names_<lang>.json`), loaded only when a locale needs it. With six languages in one file, every import would load ~50k x 6 names (1.4 s, 70 MB); the catalog now loads in ~0.13 s (faster than 0.7.0's 0.23 s), plus ~0.07 s per additional language used. **Breaking for direct data access**: product rows only contain the English name.
+
 ---
 
 ## [0.7.0] - 2026-10-31

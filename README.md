@@ -11,11 +11,17 @@ The catalog is built from the [Instacart Market Basket Analysis](https://www.kag
 | Language | Locale examples | Departments / Aisles | Product names |
 |----------|------------------|-----------------------|----------------|
 | `en` | `en_US` | Original English names | Original English names |
-| `fr` | `fr_FR` | Hand-translated | Natural translation for the 2,000 most ordered products (~2/3 of generated products); approximate automatic translation for the rest |
+| `fr` | `fr_FR`, `fr_CA`, `fr_BE`... | Hand-translated | Natural translation for the 2,000 most ordered products (~2/3 of generated products); approximate automatic translation for the rest |
+| `it` | `it_IT` | Hand-translated | Approximate automatic translation |
+| `es` | `es_ES`, `es_MX`... | Hand-translated | Approximate automatic translation |
+| `pt` | `pt_PT`, `pt_BR` | Hand-translated (European Portuguese) | Approximate automatic translation |
+| `de` | `de_DE`, `de_AT`, `de_CH` | Hand-translated | Approximate automatic translation (word order kept, see below) |
 
 > **Default language**: `en` (used for any locale not listed above, e.g. as a fallback).
 
-Planned extensions (data not built yet): `it`, `es`, `pt`, `de`. See [Adding a new language](#-adding-a-new-language) below.
+Unit labels are translated in every language ("bouteille", "bottiglia",
+"botella", "garrafa", "Flasche"). Only the product names of the language(s)
+you actually use are loaded (one `names_<lang>.json` file per language).
 
 French product names come from two sources:
 
@@ -31,6 +37,13 @@ French product names come from two sources:
   (`word_dict_fr.json`). Brand names stay untranslated. This is approximate,
   "faker-grade" output ("Hot-dogs Bœuf Bio"), fine for tests and demos but
   not a professional localization.
+
+Italian, Spanish, Portuguese and German product names use that same
+automatic translation (with their own `word_dict_<lang>.json` and
+`phrases_<lang>.json`): "Biscotti Gocce di cioccolato Senza glutine",
+"Galletas Pepitas de chocolate Sin gluten". German keeps the English word
+order, since it also puts the noun last ("Glutenfrei Schokoladenstückchen
+Kekse"). They don't have hand-checked names for popular products yet.
 
 ---
 
@@ -335,7 +348,8 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
-- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, name_<lang0>, name_<lang1>, ...]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units)
+- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units)
+- translated product names live in separate files, `faker_grocery/data/names_<lang>.json` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
 - `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
 - `currencies`: `{code: {symbol, rate, price_level, decimals}}` - fixed approximate EUR -> currency rates and grocery price levels
 - `country_currencies`: `{country_code: currency_code}` - default currency per locale country (unlisted countries use EUR)
@@ -346,7 +360,7 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 - `measured_units`: `{unit_key: {min, base, per_person, step, price_per, factor}}` - quantity ranges and pricing basis of units sold by weight/volume
 - `measured_price_ranges`: `{aisle_id: [min, max]}` - EUR per kg/L for aisles with measured units
 - `shopping_patterns`: `{name: [weekday][hour] weights}` (weekday 0 = Monday) and `country_shopping_patterns`: `{country_code: name}` - realistic shopping days/hours
-- `meta`: supported/default/planned languages, base currency, source, field layout
+- `meta`: supported/default languages, name files, base currency, source, field layout
 
 > `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only `grocery_data.json` is (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
 
@@ -359,12 +373,12 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 
 ## 🌐 Adding a new language
 
-The file is generated by [`scripts/build_data.py`](scripts/build_data.py) from the raw CSVs in `DATAS/` (`aisles.csv`, `departments.csv`, `products.csv`) plus the translation files in `scripts/translations/`. To add a language (e.g. `it`):
+The files are generated by [`scripts/build_data.py`](scripts/build_data.py) from the raw CSVs in `DATAS/` (`aisles.csv`, `departments.csv`, `products.csv`) plus the translation files in `scripts/translations/`. To add a language (e.g. `nl`):
 
-1. Create `scripts/translations/departments_it.json` and `aisles_it.json` (21 and 134 hand-translated entries).
-2. Create `scripts/translations/word_dict_it.json` (a grocery vocabulary dictionary for word-substitution product name translation — see `word_dict_fr.json` for the format and scope), and optionally `phrases_it.json` (multi-word expressions translated as a whole).
-3. Optionally, create `scripts/translations/product_names_it.json` (`{product_id: name}`) with natural translations of the most ordered products - they take precedence over the automatic translation. See `product_names_fr.json`.
-4. Add `"it"` to `TRANSLATED_LANGUAGES` in `scripts/build_data.py`. The word-order reversal in `reorder_words` suits Romance languages; for German, whose noun also comes last, disable it.
+1. Create `scripts/translations/departments_nl.json` and `aisles_nl.json` (21 and 134 hand-translated entries).
+2. Create `scripts/translations/word_dict_nl.json` and `phrases_nl.json`, with the same keys as `word_dict_fr.json` / `phrases_fr.json` (a ~860-word grocery vocabulary and ~90 multi-word expressions translated as a whole).
+3. Optionally, create `scripts/translations/product_names_nl.json` (`{product_id: name}`) with natural translations of the most ordered products - they take precedence over the automatic translation. See `product_names_fr.json`.
+4. Add `"nl"` to `TRANSLATED_LANGUAGES`, and a `"nl"` label to every entry of `UNIT_LABELS`, in `scripts/build_data.py`. If the language puts the noun first (like French, Italian, Spanish, Portuguese), also add it to `NOUN_FIRST_LANGUAGES` so word order is reversed.
 5. Re-run:
    ```bash
    python scripts/build_data.py

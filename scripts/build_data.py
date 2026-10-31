@@ -25,10 +25,14 @@ SOURCE_LANG = "en"
 # Additional languages to generate via word-substitution translation.
 # Each needs scripts/translations/word_dict_<lang>.json,
 # departments_<lang>.json and aisles_<lang>.json.
-TRANSLATED_LANGUAGES = ["fr"]
+TRANSLATED_LANGUAGES = ["fr", "it", "es", "pt", "de"]
 
 # Locales planned for future extension (not yet built).
-PLANNED_LANGUAGES = ["it", "es", "pt", "de"]
+PLANNED_LANGUAGES = []
+
+# Languages whose noun phrases put the noun first ("vinaigre balsamique
+# blanc"), so reorder_words applies. German, like English, puts it last.
+NOUN_FIRST_LANGUAGES = {"fr", "it", "es", "pt"}
 
 TOKEN_RE = re.compile(r"[A-Za-z']+|[^A-Za-z']+")
 
@@ -62,12 +66,15 @@ def protect_phrases(name, phrases):
     return name, entries
 
 
-def fallback_translation(name, word_dict, phrases):
+def fallback_translation(name, word_dict, phrases, reorder=True):
     """Translation for products without a hand-checked one: known
-    expressions first, then word-order reversal, then word substitution."""
+    expressions first, then word-order reversal (for noun-first languages),
+    then word substitution."""
     name, entries = protect_phrases(name, phrases)
     words = {**word_dict, **entries}
-    return translate_name(reorder_words(name, words), words)
+    if reorder:
+        name = reorder_words(name, words)
+    return translate_name(name, words)
 
 
 def reorder_words(name, word_dict):
@@ -139,22 +146,43 @@ PRICE_RANGES = {
 # (not by language) so departments can reference plausible units without
 # duplicating strings per language.
 UNIT_LABELS = {
-    "kg": {"en": "kg", "fr": "kg"},
-    "g": {"en": "g", "fr": "g"},
-    "l": {"en": "L", "fr": "L"},
-    "ml": {"en": "mL", "fr": "mL"},
-    "piece": {"en": "piece(s)", "fr": "pièce(s)"},
-    "pack": {"en": "pack", "fr": "paquet"},
-    "box": {"en": "box", "fr": "boîte"},
-    "bag": {"en": "bag", "fr": "sachet"},
-    "bottle": {"en": "bottle", "fr": "bouteille"},
-    "jar": {"en": "jar", "fr": "pot"},
-    "bunch": {"en": "bunch", "fr": "botte"},
-    "slice": {"en": "slice(s)", "fr": "tranche(s)"},
-    "tray": {"en": "tray", "fr": "barquette"},
-    "can": {"en": "can", "fr": "canette"},  # drink can
-    "tin": {"en": "can", "fr": "boîte de conserve"},  # food can
-    "tube": {"en": "tube", "fr": "tube"},
+    "kg": {"en": "kg", "fr": "kg", "it": "kg", "es": "kg", "pt": "kg", "de": "kg"},
+    "g": {"en": "g", "fr": "g", "it": "g", "es": "g", "pt": "g", "de": "g"},
+    "l": {"en": "L", "fr": "L", "it": "L", "es": "L", "pt": "L", "de": "L"},
+    "ml": {"en": "mL", "fr": "mL", "it": "mL", "es": "mL", "pt": "mL", "de": "mL"},
+    "piece": {
+        "en": "piece(s)",
+        "fr": "pièce(s)",
+        "it": "pezzo/i",
+        "es": "unidad(es)",
+        "pt": "unidade(s)",
+        "de": "Stück",
+    },
+    "pack": {"en": "pack", "fr": "paquet", "it": "confezione", "es": "paquete", "pt": "embalagem", "de": "Packung"},
+    "box": {"en": "box", "fr": "boîte", "it": "scatola", "es": "caja", "pt": "caixa", "de": "Schachtel"},
+    "bag": {"en": "bag", "fr": "sachet", "it": "sacchetto", "es": "bolsa", "pt": "saco", "de": "Beutel"},
+    "bottle": {"en": "bottle", "fr": "bouteille", "it": "bottiglia", "es": "botella", "pt": "garrafa", "de": "Flasche"},
+    "jar": {"en": "jar", "fr": "pot", "it": "vasetto", "es": "tarro", "pt": "frasco", "de": "Glas"},
+    "bunch": {"en": "bunch", "fr": "botte", "it": "mazzo", "es": "manojo", "pt": "molho", "de": "Bund"},
+    "slice": {
+        "en": "slice(s)",
+        "fr": "tranche(s)",
+        "it": "fetta/e",
+        "es": "loncha(s)",
+        "pt": "fatia(s)",
+        "de": "Scheibe(n)",
+    },
+    "tray": {"en": "tray", "fr": "barquette", "it": "vaschetta", "es": "bandeja", "pt": "cuvete", "de": "Schale"},
+    "can": {"en": "can", "fr": "canette", "it": "lattina", "es": "lata", "pt": "lata", "de": "Dose"},  # drink can
+    "tin": {  # food can
+        "en": "can",
+        "fr": "boîte de conserve",
+        "it": "scatoletta",
+        "es": "lata de conserva",
+        "pt": "lata de conserva",
+        "de": "Konservendose",
+    },
+    "tube": {"en": "tube", "fr": "tube", "it": "tubetto", "es": "tubo", "pt": "tubo", "de": "Tube"},
 }
 
 # Which unit keys are plausible for each aisle. Every product gets ONE of
@@ -533,15 +561,21 @@ def main():
         phrases = load_json(phrases_path) if os.path.exists(phrases_path) else {}
         for product in products:
             curated = curated_names.get(str(product["id"]))
-            product["name"][lang] = curated or fallback_translation(product["name"]["en"], word_dict, phrases)
+            product["name"][lang] = curated or fallback_translation(
+                product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES
+            )
 
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
 
     # Compact array format for products to keep the JSON file a reasonable
-    # size: [id, aisle_id, department_id, base_price, order_count, unit, name_lang1, name_lang2, ...]
+    # size: [id, aisle_id, department_id, base_price, order_count, unit, name_<source lang>].
+    # Translated names go to one names_<lang>.json file per language (a list
+    # parallel to "products"), loaded only when a locale needs it: keeping
+    # all languages in the main file would make every import load ~50k x 6
+    # names.
     products_compact = [
-        [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"]]
-        + [p["name"][lang] for lang in languages]
+        [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"],
+         p["name"][SOURCE_LANG]]
         for p in products
     ]
 
@@ -579,8 +613,9 @@ def main():
             "source": "Instacart Market Basket Analysis dataset (aisles.csv, departments.csv, products.csv, "
             "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
-            "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit"]
-            + [f"name_{lang}" for lang in languages],
+            "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
+                               f"name_{SOURCE_LANG}"],
+            "name_files": {lang: f"names_{lang}.json" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
         "aisles": aisles,
@@ -606,6 +641,12 @@ def main():
 
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"Wrote {OUTPUT_PATH} ({size_mb:.2f} MB, {len(products_compact)} products)")
+
+    for lang in TRANSLATED_LANGUAGES:
+        names_path = os.path.join(os.path.dirname(OUTPUT_PATH), data["meta"]["name_files"][lang])
+        with open(names_path, "w", encoding="utf-8") as f:
+            json.dump([p["name"][lang] for p in products], f, ensure_ascii=False, separators=(",", ":"))
+        print(f"Wrote {names_path} ({os.path.getsize(names_path) / (1024 * 1024):.2f} MB)")
 
 
 if __name__ == "__main__":

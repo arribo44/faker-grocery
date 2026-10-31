@@ -44,9 +44,31 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertEqual(GroceryStoreProvider(fake_en).language, "en")
 
     def test_unsupported_locale_falls_back_to_default(self):
-        fake_it = Faker("it_IT")
-        fake_it.add_provider(GroceryStoreProvider)
-        self.assertEqual(GroceryStoreProvider(fake_it).language, "en")
+        fake_ja = Faker("ja_JP")
+        fake_ja.add_provider(GroceryStoreProvider)
+        self.assertEqual(GroceryStoreProvider(fake_ja).language, "en")
+
+    def test_every_supported_language_is_resolved_and_localized(self):
+        expected = {"it_IT": ("it", "latticini e uova"), "es_ES": ("es", "lácteos y huevos"),
+                    "es_MX": ("es", "lácteos y huevos"), "pt_PT": ("pt", "laticínios e ovos"),
+                    "pt_BR": ("pt", "laticínios e ovos"), "de_DE": ("de", "Molkereiprodukte und Eier"),
+                    "de_AT": ("de", "Molkereiprodukte und Eier")}
+        for locale, (lang, dairy) in expected.items():
+            fake = Faker(locale)
+            fake.add_provider(GroceryStoreProvider)
+            self.assertEqual(GroceryStoreProvider(fake).language, lang, msg=locale)
+            self.assertEqual(fake.grocery_department_name(16), dairy, msg=locale)
+            item = fake.grocery_item()
+            self.assertEqual(item["unit"], self.provider._data["unit_labels"][
+                self.provider._data["by_id"][item["product_id"]][self.provider._data["unit_col"]]][lang])
+
+    def test_products_are_translated_in_every_language(self):
+        # A product whose words are all in the dictionaries: its name must
+        # differ from the English one in every language.
+        for locale in ["it_IT", "es_ES", "pt_PT", "de_DE"]:
+            fake = Faker(locale)
+            fake.add_provider(GroceryStoreProvider)
+            self.assertNotEqual(fake.product_name(27966), "Organic Raspberries", msg=locale)
 
     def test_department(self):
         dept = self.fake.grocery_department()
@@ -65,8 +87,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
     def test_departments_property_shape(self):
         self.assertEqual(len(self.provider.departments), 21)
         for info in self.provider.departments.values():
-            self.assertIn("en", info)
-            self.assertIn("fr", info)
+            for lang in ["en", "fr", "it", "es", "pt", "de"]:
+                self.assertIn(lang, info)
 
     def test_aisles_property_shape(self):
         self.assertEqual(len(self.provider.aisles), 134)
