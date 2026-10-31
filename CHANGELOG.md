@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.7.0] - 2026-10-31
 
 ### Added
 - **Natural French names for the 2,000 most ordered products** (`scripts/translations/product_names_fr.json`), about two thirds of generated products given popularity weighting: French shelf-label style, brands kept ("Organic Raspberries" -> "Framboises bio", "Hot Dog Buns" -> "Pains à hot-dog"). They take precedence over the automatic translation in `scripts/build_data.py`.

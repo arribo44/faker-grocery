@@ -24,7 +24,7 @@ from typing import Any, NotRequired, TypedDict
 
 from faker.providers import BaseProvider
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 _DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "grocery_data.json")
 _data_cache: dict[str, Any] | None = None
