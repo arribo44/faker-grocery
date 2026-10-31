@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `dev` extra (`pytest`, `ruff`, `build`) and a pinned ruff rule set.
 - 12 new tests (60 -> 72): argument validation, seed reproducibility, multi-locale usage.
 - README: multi-locale usage (`fake[locale].add_provider(...)`) and error behavior.
+- README: "Data source & license" section (original Instacart source, CC0 Kaggle re-upload actually used, MIT scope limited to the code).
 
 ---
 
