@@ -21,7 +21,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
         data = self.provider._data
         for unit_key, spec in data["measured_units"].items():
             if data["unit_labels"][unit_key][lang] == item["unit"]:
-                return item["quantity"] * spec["factor"]
+                return round(item["quantity"] * spec["factor"], 6)
         return item["quantity"]
 
     def price_factor(self, currency):

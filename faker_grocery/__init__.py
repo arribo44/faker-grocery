@@ -456,7 +456,9 @@ class GroceryStoreProvider(BaseProvider):
             price_per = self._unit_label(unit_key)
         else:
             quantity = self._measured_quantity(measure, family_size)
-            billed_quantity = quantity * measure["factor"]
+            # Rounded so e.g. 450 g -> 0.45 kg exactly, not 0.45000000000000001
+            # (which could tip a half-cent total the other way).
+            billed_quantity = round(quantity * measure["factor"], 6)
             price_per = self._unit_label(measure["price_per"])
         unit_price = record["price"]
         return {
