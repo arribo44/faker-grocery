@@ -9,3 +9,6 @@ DATAS/.~lock.*
 
 # Fichier de déploiement (aide-mémoire personnel, exclu de Git)
 DEPLOY.md
+
+# Editor settings
+.vscode/

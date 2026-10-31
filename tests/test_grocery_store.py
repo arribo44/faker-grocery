@@ -65,7 +65,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertIn(aisle, names)
 
     def test_aisle_with_department_filter(self):
-        for dept_id, dept_info in self.provider.departments.items():
+        for dept_id in self.provider.departments:
             aisle = self.fake.aisle(department=dept_id)
             expected_aisles = {
                 info["fr"] for info in self.provider.aisles.values()
@@ -393,6 +393,83 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertEqual(dt.date(), fixed_datetime.date())
         self.assertGreaterEqual(dt.hour, 8)
         self.assertLess(dt.hour, 20)
+
+    # -- argument validation ------------------------------------------------------
+
+    def test_price_with_only_one_bound_raises(self):
+        # Previously min_price alone was silently ignored (price(min_price=5) -> 4.95).
+        with self.assertRaises(ValueError):
+            self.fake.price(min_price=5.0)
+        with self.assertRaises(ValueError):
+            self.fake.price(max_price=5.0)
+
+    def test_price_with_inverted_range_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.price(min_price=20.0, max_price=10.0)
+
+    def test_shopping_datetime_invalid_hours_raise(self):
+        # Previously open_hour=20, close_hour=8 returned a 20:xx time.
+        for open_hour, close_hour in [(20, 8), (10, 10), (-1, 8), (8, 25)]:
+            with self.assertRaises(ValueError):
+                self.fake.shopping_datetime(open_hour=open_hour, close_hour=close_hour)
+
+    def test_shopping_datetime_full_day_opening_hours(self):
+        for _ in range(50):
+            dt = self.fake.shopping_datetime(open_hour=0, close_hour=24)
+            self.assertLessEqual(dt.hour, 23)
+
+    def test_grocery_list_inverted_item_range_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.grocery_list(min_items=10, max_items=5)
+
+    def test_grocery_list_invalid_family_size_raises(self):
+        for family_size in [0, -3, 2.5, True]:
+            with self.assertRaises(ValueError):
+                self.fake.grocery_list(family_size=family_size)
+
+    def test_grocery_item_invalid_family_size_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.grocery_item(family_size=0)
+
+    def test_grocery_list_unknown_department_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.grocery_list(department="not a real department")
+
+    def test_unknown_ids_raise_value_error(self):
+        # Previously these leaked a bare KeyError.
+        for call in [
+            lambda: self.fake.department_name(99),
+            lambda: self.fake.aisle_name(9999),
+            lambda: self.fake.unit(department=99),
+            lambda: self.fake.aisle(department=99),
+            lambda: self.fake.product(aisle=9999),
+            lambda: self.fake.product_name("not an id"),
+        ]:
+            with self.assertRaises(ValueError):
+                call()
+
+    def test_bool_is_not_accepted_as_an_id(self):
+        # bool is a subclass of int: department=True used to mean department 1.
+        with self.assertRaises(ValueError):
+            self.fake.aisle(department=True)
+        with self.assertRaises(ValueError):
+            self.fake.product(aisle=False)
+
+    def test_same_seed_gives_same_grocery_list(self):
+        Faker.seed(1234)
+        first = self.fake.grocery_list(with_datetime=True)
+        Faker.seed(1234)
+        second = self.fake.grocery_list(with_datetime=True)
+        self.assertEqual(first, second)
+
+    def test_multi_locale_faker_via_per_locale_add_provider(self):
+        # Faker's multi-locale proxy doesn't implement add_provider(); it has
+        # to be added to each locale's generator (as documented in the README).
+        fake = Faker(["fr_FR", "en_US"])
+        for locale in ("fr_FR", "en_US"):
+            fake[locale].add_provider(GroceryStoreProvider)
+        self.assertIn(fake["fr_FR"].department_name(16), {self.provider.departments["16"]["fr"]})
+        self.assertIn(fake["en_US"].department_name(16), {self.provider.departments["16"]["en"]})
 
 
 if __name__ == "__main__":

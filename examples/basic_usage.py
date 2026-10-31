@@ -44,7 +44,7 @@ def demo_locale(locale_name):
               f"[{record['aisle']} / {record['department']}]")
 
     print("\n--- 5 Prices, quantities and units ---")
-    for i in range(5):
+    for _ in range(5):
         print(f"  {fake.quantity()} {fake.unit()} - {fake.price():.2f}")
 
     print("\n--- Complete shopping list (default: couple, family_size=2) ---")

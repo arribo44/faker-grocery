@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- `price(min_price=...)` (or `max_price=...`) alone silently ignored the given bound and returned a price from a department range instead; passing only one bound, or `min_price > max_price`, now raises `ValueError`.
+- `shopping_datetime(open_hour=20, close_hour=8)` returned a time outside opening hours; opening hours are now validated (`0 <= open_hour < close_hour <= 24`).
+- `grocery_list(min_items > max_items)` raised an obscure `randrange` error; it now raises a clear `ValueError`.
+- `grocery_list()` / `grocery_item()` silently accepted `family_size <= 0`; it must now be a positive integer.
+- Unknown ids in `department_name()`, `aisle_name()` and `unit(department=...)` raised a bare `KeyError`; every unknown id/name now raises `ValueError`.
+- `bool` values (`department=True`) were accepted as ids `1`/`0`; they are now rejected.
+
+### Changed
+- **Performance**: random product picking uses `random.choice` instead of Faker's `random_element` (which scanned the whole ~50k-row catalog on every call), and product id lookups use an index instead of a linear scan. `product()` is ~190x faster, `grocery_list()` ~60x, `price(product=...)` / `product_name()` ~1000x. Output stays reproducible with `Faker.seed()`, **but a given seed now produces different values than in 0.3.1**.
+- `grocery_list(department=...)` resolves the department once instead of once per item, and fails fast on an unknown department.
+- `grocery_data.json` is written without indentation (8.8 MB -> 4.2 MB, same content); the wheel shrinks from 1.9 MB to 1.6 MB.
+- Packaging moved from `setup.py` to `pyproject.toml`; the version is now read from `faker_grocery.__version__` only. `requires-python` raised from `>=3.7` to `>=3.9` (Faker 20+ already required 3.8+), classifiers now list 3.9-3.14.
+- The private Faker locale lookup is isolated in `_generator_locale()`.
+
+### Added
+- GitHub Actions CI: ruff, pytest on Python 3.9-3.14 plus Faker 20.0.0, package build check.
+- `dev` extra (`pytest`, `ruff`, `build`) and a pinned ruff rule set.
+- 12 new tests (60 -> 72): argument validation, seed reproducibility, multi-locale usage.
+- README: multi-locale usage (`fake[locale].add_provider(...)`) and error behavior.
+
+---
+
 ## [0.3.1] - 2026-09-20
 
 ### Fixed
@@ -79,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 1. **Before releasing a new version**:
    - Move all changes from `[Unreleased]` section to the new version section
    - Add the release date
-   - Update the version in `setup.py` and `faker_grocery/__init__.py` (`__version__`)
+   - Update the version in `faker_grocery/__init__.py` (`__version__`, read by `pyproject.toml`)
    - If the catalog data changed (`DATAS/*.csv` or `scripts/translations/*.json`), re-run `python scripts/build_data.py` before releasing
 
 2. **When making changes**:
@@ -114,9 +139,9 @@ git commit -m "Add new feature X"
 
 # 4. When ready to release:
 #    - Create new version section in CHANGELOG.md
-#    - Update version in setup.py and faker_grocery/__init__.py
+#    - Update version in faker_grocery/__init__.py
 #    - Commit
-git add CHANGELOG.md setup.py faker_grocery/__init__.py
+git add CHANGELOG.md faker_grocery/__init__.py
 git commit -m "Bump version to 0.3.0"
 
 # 5. Tag the release
@@ -124,6 +149,7 @@ git tag -a v0.3.0 -m "Release v0.3.0"
 git push origin v0.3.0
 
 # 6. Publish to PyPI
+rm -rf dist && python -m build
 twine upload dist/*
 ```
 

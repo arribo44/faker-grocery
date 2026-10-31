@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "faker-grocery"
+dynamic = ["version"]
+description = "A custom Faker provider for simulating supermarket/hypermarket products, aisles and departments"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "jctranc" }]
+keywords = ["faker", "grocery", "supermarket", "hypermarket", "test data"]
+requires-python = ">=3.9"
+dependencies = ["faker>=20.0.0"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+dev = ["pytest", "ruff", "build"]
+
+[project.urls]
+Homepage = "https://github.com/arribo44/faker-grocery"
+Changelog = "https://github.com/arribo44/faker-grocery/blob/main/CHANGELOG.md"
+
+[tool.setuptools.dynamic]
+version = { attr = "faker_grocery.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["faker_grocery*"]
+
+[tool.setuptools.package-data]
+"faker_grocery.data" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+# Explicit rule set so CI doesn't change behaviour when ruff's defaults do.
+select = ["E", "F", "W", "B"]

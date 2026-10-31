@@ -45,10 +45,12 @@ def _build_index(raw):
 
     products = raw["products"]
 
+    by_id = {}
     by_department = {}
     by_aisle = {}
     for row in products:
         aisle_id, department_id = row[1], row[2]
+        by_id[row[0]] = row
         by_aisle.setdefault(aisle_id, []).append(row)
         by_department.setdefault(department_id, []).append(row)
 
@@ -63,9 +65,35 @@ def _build_index(raw):
         "unit_labels": raw["unit_labels"],
         "department_units": raw["department_units"],
         "products": products,
+        "by_id": by_id,
         "by_department": by_department,
         "by_aisle": by_aisle,
     }
+
+
+def _generator_locale(generator, default="en_US"):
+    """Best-effort lookup of the locale a Faker generator was created with.
+
+    Faker has no public API for this: the locale lives in the name-mangled
+    private `Generator.__config` dict. Kept in one place so a future Faker
+    change only needs fixing here; falls back to `default` if it moves."""
+    config = getattr(generator, "_Generator__config", None)
+    if isinstance(config, dict) and config.get("locale"):
+        return config["locale"]
+    return default
+
+
+def _check_family_size(family_size):
+    if isinstance(family_size, bool) or not isinstance(family_size, int) or family_size < 1:
+        raise ValueError(f"family_size must be a positive integer, got {family_size!r}")
+
+
+def _is_id(value):
+    """True for an int id or a numeric string id (bools are rejected, even
+    though `bool` is a subclass of `int`)."""
+    if isinstance(value, bool):
+        return False
+    return isinstance(value, int) or (isinstance(value, str) and value.isdigit())
 
 
 class GroceryStoreProvider(BaseProvider):
@@ -80,10 +108,7 @@ class GroceryStoreProvider(BaseProvider):
 
     def __init__(self, generator):
         super().__init__(generator)
-        if hasattr(generator, "_Generator__config") and isinstance(generator._Generator__config, dict):
-            self._provider_locale = generator._Generator__config.get("locale", "en_US")
-        else:
-            self._provider_locale = "en_US"
+        self._provider_locale = _generator_locale(generator)
 
         data = _load_data()
         lang = self._provider_locale.split("_")[0].lower()
@@ -119,8 +144,12 @@ class GroceryStoreProvider(BaseProvider):
         """Accept a department id (int/str) or a localized name and return the int id."""
         if department is None:
             return None
-        if isinstance(department, int) or (isinstance(department, str) and department.isdigit()):
+        if _is_id(department):
+            if str(int(department)) not in self.departments:
+                raise ValueError(f"Unknown department: {department!r}")
             return int(department)
+        if not isinstance(department, str):
+            raise ValueError(f"Unknown department: {department!r}")
         needle = str(department).strip().lower()
         for dept_id, names in self.departments.items():
             for lang in self._data["languages"]:
@@ -132,8 +161,12 @@ class GroceryStoreProvider(BaseProvider):
         """Accept an aisle id (int/str) or a localized name and return the int id."""
         if aisle is None:
             return None
-        if isinstance(aisle, int) or (isinstance(aisle, str) and aisle.isdigit()):
+        if _is_id(aisle):
+            if str(int(aisle)) not in self.aisles:
+                raise ValueError(f"Unknown aisle: {aisle!r}")
             return int(aisle)
+        if not isinstance(aisle, str):
+            raise ValueError(f"Unknown aisle: {aisle!r}")
         needle = str(aisle).strip().lower()
         for aisle_id, names in self.aisles.items():
             for lang in self._data["languages"]:
@@ -154,7 +187,9 @@ class GroceryStoreProvider(BaseProvider):
 
     def department_name(self, department_id):
         """Return the localized name of a given department id."""
-        return self.departments[str(department_id)][self._lang]
+        if not _is_id(department_id) or str(int(department_id)) not in self.departments:
+            raise ValueError(f"Unknown department id: {department_id!r}")
+        return self.departments[str(int(department_id))][self._lang]
 
     def aisle(self, department=None):
         """Return a random aisle name in the current language, optionally
@@ -181,7 +216,9 @@ class GroceryStoreProvider(BaseProvider):
 
     def aisle_name(self, aisle_id):
         """Return the localized name of a given aisle id."""
-        return self.aisles[str(aisle_id)][self._lang]
+        if not _is_id(aisle_id) or str(int(aisle_id)) not in self.aisles:
+            raise ValueError(f"Unknown aisle id: {aisle_id!r}")
+        return self.aisles[str(int(aisle_id))][self._lang]
 
     # -- products -----------------------------------------------------------
 
@@ -202,7 +239,9 @@ class GroceryStoreProvider(BaseProvider):
         else:
             rows = self._data["products"]
 
-        return self.random_element(rows)
+        # random.choice rather than random_element: the latter scans the whole
+        # sequence on every call, which is slow on the ~50k-row catalog.
+        return self.generator.random.choice(rows)
 
     def product(self, aisle=None, department=None):
         """Return a random product name in the current language, optionally
@@ -232,17 +271,15 @@ class GroceryStoreProvider(BaseProvider):
         }
 
     def product_name(self, product_id):
-        """Return the localized name of a given product id. O(n) lookup."""
-        for row in self._data["products"]:
-            if row[0] == int(product_id):
-                return row[self._data["name_col"][self._lang]]
-        raise ValueError(f"Unknown product id: {product_id!r}")
+        """Return the localized name of a given product id."""
+        row = self._find_product_row(product_id)
+        return row[self._data["name_col"][self._lang]]
 
     def _find_product_row(self, product_id):
-        for row in self._data["products"]:
-            if row[0] == int(product_id):
-                return row
-        raise ValueError(f"Unknown product id: {product_id!r}")
+        row = self._data["by_id"].get(int(product_id)) if _is_id(product_id) else None
+        if row is None:
+            raise ValueError(f"Unknown product id: {product_id!r}")
+        return row
 
     # -- price / quantity / unit ---------------------------------------------
 
@@ -259,14 +296,18 @@ class GroceryStoreProvider(BaseProvider):
         - If `product` (a product id) is given, returns that product's
           catalog base price jittered by +/-5% (its "probable price" today).
         - Elif a custom (min_price, max_price) range is given, returns a
-          uniform random price in that range.
+          uniform random price in that range (both bounds are required).
         - Otherwise returns a uniform random price within the given
           department's typical range (or a random department's range if
           none is given)."""
         if product is not None:
             row = self._find_product_row(product)
             return self._jitter_price(row[self._data["base_price_col"]])
-        if min_price is None or max_price is None:
+        if (min_price is None) != (max_price is None):
+            raise ValueError("min_price and max_price must be given together")
+        if min_price is not None and min_price > max_price:
+            raise ValueError(f"min_price ({min_price}) is greater than max_price ({max_price})")
+        if min_price is None:
             dept_id = self._resolve_department_id(department)
             if dept_id is None:
                 dept_id = int(self.random_element(list(self._data["price_ranges"].keys())))
@@ -296,6 +337,7 @@ class GroceryStoreProvider(BaseProvider):
     @staticmethod
     def _max_quantity_for_family(family_size):
         """Bigger households tend to buy more of a given article at once."""
+        _check_family_size(family_size)
         return max(2, family_size + 1)
 
     def grocery_item(self, aisle=None, department=None, family_size=None):
@@ -306,7 +348,7 @@ class GroceryStoreProvider(BaseProvider):
         `family_size` (if given) scales up the plausible quantity range
         (bigger households buy more of a given item at once)."""
         record = self.product_record(aisle=aisle, department=department)
-        max_quantity = self._max_quantity_for_family(family_size) if family_size else 10
+        max_quantity = self._max_quantity_for_family(family_size) if family_size is not None else 10
         quantity = self.quantity(max_quantity=max_quantity)
         unit = self.unit(department=record["department_id"])
         unit_price = record["price"]
@@ -324,14 +366,20 @@ class GroceryStoreProvider(BaseProvider):
     def shopping_datetime(self, date=None, open_hour=8, close_hour=20):
         """Return a random datetime plausible for a shopping trip: a random
         day (within the last year) unless `date` (a date or datetime) is
-        given, combined with a random time within store opening hours."""
+        given, combined with a random time within store opening hours
+        (`open_hour` inclusive, `close_hour` exclusive, 0 <= open < close <= 24)."""
+        if not 0 <= open_hour < close_hour <= 24:
+            raise ValueError(
+                f"Invalid opening hours: open_hour={open_hour!r}, close_hour={close_hour!r} "
+                "(expected 0 <= open_hour < close_hour <= 24)"
+            )
         if date is None:
             day = self.generator.date_between(start_date="-1y", end_date="today")
         elif isinstance(date, _datetime.datetime):
             day = date.date()
         else:
             day = date
-        hour = self.random_int(min=open_hour, max=max(open_hour, close_hour - 1))
+        hour = self.random_int(min=open_hour, max=close_hour - 1)
         minute = self.random_int(min=0, max=59)
         second = self.random_int(min=0, max=59)
         return _datetime.datetime.combine(day, _datetime.time(hour, minute, second))
@@ -349,14 +397,20 @@ class GroceryStoreProvider(BaseProvider):
         - `with_datetime=True` (or passing `date`) adds a 'shopping_datetime'
           field: a plausible date/time for the trip (see `shopping_datetime`).
         """
+        _check_family_size(family_size)
         if min_items is None:
             min_items = max(3, 4 + 3 * (family_size - 1))
         if max_items is None:
             max_items = max(min_items + 3, 10 + 5 * (family_size - 1))
+        if min_items < 0 or min_items > max_items:
+            raise ValueError(f"Invalid item-count range: min_items={min_items!r}, max_items={max_items!r}")
 
+        # Resolve once (and fail fast on an unknown department) rather than
+        # re-resolving a department name for every item.
+        dept_id = self._resolve_department_id(department)
         item_count = self.random_int(min=min_items, max=max_items)
         items = [
-            self.grocery_item(department=department, family_size=family_size)
+            self.grocery_item(department=dept_id, family_size=family_size)
             for _ in range(item_count)
         ]
         total = round(sum(item["total_price"] for item in items), 2)

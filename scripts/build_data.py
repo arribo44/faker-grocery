@@ -242,7 +242,9 @@ def main():
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+        # Compact separators: indentation would roughly double the file size
+        # for no benefit (nobody reads a 50k-row JSON by hand).
+        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
 
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"Wrote {OUTPUT_PATH} ({size_mb:.2f} MB, {len(products_compact)} products)")
