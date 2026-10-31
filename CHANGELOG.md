@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.8.0] - 2026-10-31
 
 ### Added
 - **Italian, Spanish, Portuguese and German** (`it`, `es`, `pt`, `de`): hand-translated department and aisle names, unit labels, and automatic product name translation (858-word dictionaries and 88-expression tables per language, word-order reversal for the Romance languages). Locales such as `it_IT`, `es_ES`, `es_MX`, `pt_PT`, `pt_BR`, `de_DE`, `de_AT`, `de_CH` now get localized data instead of the English fallback.
