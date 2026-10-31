@@ -148,32 +148,48 @@ DEPARTMENT_UNITS = {
 }
 
 
+# Quantities for units sold by weight or volume, instead of by the piece.
+# Items in these units are priced per `price_per` unit (per kg or per L,
+# `factor` converting a quantity to it: 350 g -> 0.35 kg) and get a
+# quantity in [min, base + per_person * family size], in multiples of
+# `step` - e.g. 0.85 kg of apples or 1.5 L of milk rather than "7 kg of
+# basil". Every other unit is counted (1, 2, 3... articles).
+MEASURED_UNITS = {
+    "kg": {"min": 0.2, "base": 0.3, "per_person": 0.35, "step": 0.05, "price_per": "kg", "factor": 1},
+    "g": {"min": 100, "base": 150, "per_person": 150, "step": 50, "price_per": "kg", "factor": 0.001},
+    "l": {"min": 0.5, "base": 0.5, "per_person": 0.5, "step": 0.5, "price_per": "l", "factor": 1},
+    "ml": {"min": 250, "base": 250, "per_person": 250, "step": 250, "price_per": "l", "factor": 0.001},
+}
+
 # Currency the catalog prices (PRICE_RANGES and every base_price) are
 # expressed in.
 BASE_CURRENCY = "EUR"
 
 # Currencies prices can be converted to. `rate` is a fixed, approximate
 # EUR -> currency conversion factor (deliberately not a live exchange rate:
-# the data must stay stable and offline), `decimals` the number of minor
-# units prices are rounded to.
+# the data must stay stable and offline), `price_level` the approximate
+# grocery price level of the currency's country relative to the eurozone
+# (exchange rates alone would make a basket cost the same everywhere, which
+# it doesn't: groceries are much dearer in Switzerland, much cheaper in
+# India), `decimals` the number of minor units prices are rounded to.
 CURRENCIES = {
-    "EUR": {"symbol": "€", "rate": 1.0, "decimals": 2},
-    "USD": {"symbol": "$", "rate": 1.1, "decimals": 2},
-    "GBP": {"symbol": "£", "rate": 0.85, "decimals": 2},
-    "CHF": {"symbol": "CHF", "rate": 0.95, "decimals": 2},
-    "CAD": {"symbol": "$", "rate": 1.5, "decimals": 2},
-    "AUD": {"symbol": "$", "rate": 1.65, "decimals": 2},
-    "NZD": {"symbol": "$", "rate": 1.8, "decimals": 2},
-    "SEK": {"symbol": "kr", "rate": 11.5, "decimals": 2},
-    "NOK": {"symbol": "kr", "rate": 11.7, "decimals": 2},
-    "DKK": {"symbol": "kr", "rate": 7.46, "decimals": 2},
-    "PLN": {"symbol": "zł", "rate": 4.3, "decimals": 2},
-    "CZK": {"symbol": "Kč", "rate": 25.0, "decimals": 2},
-    "HUF": {"symbol": "Ft", "rate": 400.0, "decimals": 0},
-    "JPY": {"symbol": "¥", "rate": 160.0, "decimals": 0},
-    "INR": {"symbol": "₹", "rate": 92.0, "decimals": 2},
-    "BRL": {"symbol": "R$", "rate": 6.0, "decimals": 2},
-    "MXN": {"symbol": "$", "rate": 20.0, "decimals": 2},
+    "EUR": {"symbol": "€", "rate": 1.0, "price_level": 1.0, "decimals": 2},
+    "USD": {"symbol": "$", "rate": 1.1, "price_level": 1.15, "decimals": 2},
+    "GBP": {"symbol": "£", "rate": 0.85, "price_level": 0.95, "decimals": 2},
+    "CHF": {"symbol": "CHF", "rate": 0.95, "price_level": 1.6, "decimals": 2},
+    "CAD": {"symbol": "$", "rate": 1.5, "price_level": 1.1, "decimals": 2},
+    "AUD": {"symbol": "$", "rate": 1.65, "price_level": 1.15, "decimals": 2},
+    "NZD": {"symbol": "$", "rate": 1.8, "price_level": 1.15, "decimals": 2},
+    "SEK": {"symbol": "kr", "rate": 11.5, "price_level": 1.0, "decimals": 2},
+    "NOK": {"symbol": "kr", "rate": 11.7, "price_level": 1.3, "decimals": 2},
+    "DKK": {"symbol": "kr", "rate": 7.46, "price_level": 1.15, "decimals": 2},
+    "PLN": {"symbol": "zł", "rate": 4.3, "price_level": 0.65, "decimals": 2},
+    "CZK": {"symbol": "Kč", "rate": 25.0, "price_level": 0.75, "decimals": 2},
+    "HUF": {"symbol": "Ft", "rate": 400.0, "price_level": 0.7, "decimals": 0},
+    "JPY": {"symbol": "¥", "rate": 160.0, "price_level": 0.85, "decimals": 0},
+    "INR": {"symbol": "₹", "rate": 92.0, "price_level": 0.3, "decimals": 2},
+    "BRL": {"symbol": "R$", "rate": 6.0, "price_level": 0.6, "decimals": 2},
+    "MXN": {"symbol": "$", "rate": 20.0, "price_level": 0.65, "decimals": 2},
 }
 
 # Default currency for the country part of a Faker locale (e.g. "US" in
@@ -210,6 +226,25 @@ def base_price_for(product_id, department_id):
     return round(rng.triangular(low, high, mode), 2)
 
 
+def load_order_time_weights():
+    """7x24 order counts, rows indexed like `datetime.date.weekday()`
+    (0 = Monday). Instacart doesn't document its `order_dow` encoding; it is
+    commonly read as 0 = Sunday (the two busiest days, 0 and 1, then being
+    Sunday and Monday), which is the assumption made here."""
+    weights = [[0] * 24 for _ in range(7)]
+    with open(os.path.join(DATAS_DIR, "order_times.csv"), encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            weekday = (int(row["order_dow"]) + 6) % 7
+            weights[weekday][int(row["order_hour_of_day"])] = int(row["order_count"])
+    return weights
+
+
+def load_product_popularity():
+    """product_id -> number of times it was ordered (absent: never ordered)."""
+    with open(os.path.join(DATAS_DIR, "product_popularity.csv"), encoding="utf-8") as f:
+        return {int(row["product_id"]): int(row["order_count"]) for row in csv.DictReader(f)}
+
+
 def main():
     aisles = {}
     with open(os.path.join(DATAS_DIR, "aisles.csv"), encoding="utf-8") as f:
@@ -238,8 +273,10 @@ def main():
     for product in products:
         aisles[str(product["aisle_id"])]["department_id"] = product["department_id"]
 
+    popularity = load_product_popularity()
     for product in products:
         product["base_price"] = base_price_for(product["id"], product["department_id"])
+        product["order_count"] = popularity.get(product["id"], 0)
 
     for lang in TRANSLATED_LANGUAGES:
         word_dict = load_json(os.path.join(TRANSLATIONS_DIR, f"word_dict_{lang}.json"))
@@ -256,9 +293,9 @@ def main():
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
 
     # Compact array format for products to keep the JSON file a reasonable
-    # size: [id, aisle_id, department_id, base_price, name_lang1, name_lang2, ...]
+    # size: [id, aisle_id, department_id, base_price, order_count, name_lang1, name_lang2, ...]
     products_compact = [
-        [p["id"], p["aisle_id"], p["department_id"], p["base_price"]]
+        [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"]]
         + [p["name"][lang] for lang in languages]
         for p in products
     ]
@@ -275,6 +312,8 @@ def main():
     assert BASE_CURRENCY in CURRENCIES and CURRENCIES[BASE_CURRENCY]["rate"] == 1.0
     unknown = set(COUNTRY_CURRENCIES.values()) - set(CURRENCIES)
     assert not unknown, f"COUNTRY_CURRENCIES references unknown currencies: {unknown}"
+    for unit_key, spec in MEASURED_UNITS.items():
+        assert unit_key in unit_labels and spec["price_per"] in unit_labels, unit_key
 
     data = {
         "meta": {
@@ -282,9 +321,10 @@ def main():
             "default_language": SOURCE_LANG,
             "base_currency": BASE_CURRENCY,
             "planned_languages": PLANNED_LANGUAGES,
-            "source": "Instacart Market Basket Analysis dataset (aisles.csv, departments.csv, products.csv)",
+            "source": "Instacart Market Basket Analysis dataset (aisles.csv, departments.csv, products.csv, "
+            "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
-            "product_fields": ["id", "aisle_id", "department_id", "base_price"]
+            "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count"]
             + [f"name_{lang}" for lang in languages],
         },
         "departments": departments,
@@ -294,6 +334,8 @@ def main():
         "country_currencies": COUNTRY_CURRENCIES,
         "unit_labels": unit_labels,
         "department_units": department_units,
+        "measured_units": MEASURED_UNITS,
+        "order_time_weights": load_order_time_weights(),
         "products": products_compact,
     }
 

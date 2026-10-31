@@ -52,7 +52,7 @@ def demo_locale(locale_name):
     for item in shopping_list["items"]:
         print(f"  - {item['quantity']} {item['unit']} x {item['product']} "
               f"({item['aisle']} / {item['department']}): "
-              f"{item['unit_price']:.2f} x {item['quantity']} = {item['total_price']:.2f}")
+              f"{item['unit_price']:.2f}/{item['price_per']} = {item['total_price']:.2f}")
     print(f"\nFamily size: {shopping_list['family_size']}")
     print(f"Item count: {shopping_list['item_count']}")
     print(f"Total: {shopping_list['total']:.2f} {shopping_list['currency']}")

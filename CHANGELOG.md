@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Popularity-weighted products**: `product()`, `product_record()`, `grocery_item()` and `grocery_list()` now pick products in proportion to how often they were ordered in the Instacart data (~32M order lines), so baskets contain bananas, milk and strawberries far more often than niche items. `weighted=False` restores a uniform pick.
+- **Realistic shopping days and hours**: `shopping_datetime()` (and `grocery_list(with_datetime=True)`) follow the weekly pattern of the ~3.4M Instacart orders (busier days, quieter opening/closing hours), still within the given opening hours. `weighted=False` restores a uniform pick.
+- **Measured quantities**: items sold by weight or volume (kg, g, L, mL) get realistic quantities (e.g. 0.85 kg, 350 g, 1.5 L, in fixed steps, scaled by `family_size`) and are priced per kg or per L; counted items keep integer quantities priced per article. New `price_per` field on `grocery_item()` results.
+- **Grocery price levels**: currency conversion now also applies the country's approximate grocery price level (`price_level`, e.g. CHF 1.6, INR 0.3), so a basket in Switzerland costs more than a plain EUR->CHF conversion.
+- `scripts/build_order_stats.py` aggregates the large, unversioned Instacart `orders.csv` / `order_products__prior.csv` into the small versioned `DATAS/order_times.csv` and `DATAS/product_popularity.csv`.
+- 14 new tests (83 -> 97).
+
+### Changed
+- `grocery_item()` `quantity` is a float (kg, L) or a multiple of 50/250 (g, mL) for measured units, and `total_price` is computed from the quantity in kg/L. **Breaking** for code assuming `total_price == quantity * unit_price` for every item.
+- Default product and shopping-time distributions changed (weighted by default): the same seed yields different values than 0.4.0.
+- Converted prices changed for every non-EUR currency (price level now applied).
+- `products` rows in `grocery_data.json` gained an `order_count` column (`[id, aisle_id, department_id, base_price, order_count, name_<lang>...]`); new `measured_units` and `order_time_weights` tables, `price_level` in `currencies`. **Breaking for direct data access**; column positions are now read from `meta.product_fields`.
+
+---
+
 ## [0.4.0] - 2026-10-31
 
 ### Added

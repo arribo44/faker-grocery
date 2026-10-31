@@ -16,6 +16,7 @@ Supported languages: en, fr.
 Planned (data not yet built): it, es, pt, de.
 """
 import datetime as _datetime
+import itertools
 import json
 import os
 
@@ -38,10 +39,11 @@ def _load_data():
 
 def _build_index(raw):
     languages = raw["meta"]["languages"]
-    # products rows are [id, aisle_id, department_id, base_price, name_<lang0>, name_<lang1>, ...]
-    base_price_col = 3
-    name_offset = 4
-    name_col = {lang: name_offset + i for i, lang in enumerate(languages)}
+    # products rows are [id, aisle_id, department_id, base_price, order_count, name_<lang0>, ...]
+    fields = raw["meta"]["product_fields"]
+    base_price_col = fields.index("base_price")
+    order_count_col = fields.index("order_count")
+    name_col = {lang: fields.index(f"name_{lang}") for lang in languages}
 
     products = raw["products"]
 
@@ -53,6 +55,11 @@ def _build_index(raw):
         by_id[row[0]] = row
         by_aisle.setdefault(aisle_id, []).append(row)
         by_department.setdefault(department_id, []).append(row)
+
+    def cum_weights(rows):
+        # Popularity weight = number of times the product was ordered in the
+        # Instacart data, +1 so never-ordered products can still come up.
+        return list(itertools.accumulate(row[order_count_col] + 1 for row in rows))
 
     return {
         "meta": raw["meta"],
@@ -66,10 +73,17 @@ def _build_index(raw):
         "country_currencies": raw["country_currencies"],
         "unit_labels": raw["unit_labels"],
         "department_units": raw["department_units"],
+        "measured_units": raw["measured_units"],
+        "order_time_weights": raw["order_time_weights"],
         "products": products,
         "by_id": by_id,
         "by_department": by_department,
         "by_aisle": by_aisle,
+        # Cumulative popularity weights, parallel to the row lists above, for
+        # O(log n) weighted picks with random.choices(cum_weights=...).
+        "cum_weights": cum_weights(products),
+        "cum_weights_by_department": {k: cum_weights(v) for k, v in by_department.items()},
+        "cum_weights_by_aisle": {k: cum_weights(v) for k, v in by_aisle.items()},
     }
 
 
@@ -230,7 +244,7 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- products -----------------------------------------------------------
 
-    def _pick_product_row(self, aisle=None, department=None):
+    def _pick_product_row(self, aisle=None, department=None, weighted=True):
         aisle_id = self._resolve_aisle_id(aisle)
         dept_id = self._resolve_department_id(department)
 
@@ -240,28 +254,38 @@ class GroceryStoreProvider(BaseProvider):
                 raise ValueError(f"No product found for aisle: {aisle!r}")
             if dept_id is not None and self.aisles[str(aisle_id)]["department_id"] != dept_id:
                 raise ValueError(f"Aisle {aisle!r} does not belong to department {department!r}")
+            cum_weights = self._data["cum_weights_by_aisle"][aisle_id]
         elif dept_id is not None:
             rows = self._data["by_department"].get(dept_id)
             if not rows:
                 raise ValueError(f"No product found for department: {department!r}")
+            cum_weights = self._data["cum_weights_by_department"][dept_id]
         else:
             rows = self._data["products"]
+            cum_weights = self._data["cum_weights"]
 
-        # random.choice rather than random_element: the latter scans the whole
-        # sequence on every call, which is slow on the ~50k-row catalog.
+        # random.choice(s) rather than random_element: the latter scans the
+        # whole sequence on every call, which is slow on the ~50k-row catalog.
+        if weighted:
+            return self.generator.random.choices(rows, cum_weights=cum_weights)[0]
         return self.generator.random.choice(rows)
 
-    def product(self, aisle=None, department=None):
+    def product(self, aisle=None, department=None, weighted=True):
         """Return a random product name in the current language, optionally
-        filtered by aisle and/or department (id or localized name)."""
-        row = self._pick_product_row(aisle=aisle, department=department)
+        filtered by aisle and/or department (id or localized name).
+
+        By default products are picked in proportion to how often they were
+        ordered in the Instacart data (bananas and milk come up far more
+        often than niche items); `weighted=False` picks uniformly."""
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         return row[self._data["name_col"][self._lang]]
 
-    def product_record(self, aisle=None, department=None):
+    def product_record(self, aisle=None, department=None, weighted=True):
         """Return a full dict describing a random product: id, localized
         product/aisle/department names and their ids, its stable catalog
-        'base_price' and a 'price' jittered +/-5% around it (see `price`)."""
-        row = self._pick_product_row(aisle=aisle, department=department)
+        'base_price' and a 'price' jittered +/-5% around it (see `price`).
+        `weighted` works as in `product`."""
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         return self._row_to_record(row)
 
     def _row_to_record(self, row):
@@ -299,7 +323,9 @@ class GroceryStoreProvider(BaseProvider):
         By default the currency follows the country of the Faker locale
         ('en_US' -> USD, 'en_GB' -> GBP, 'fr_CA' -> CAD...), falling back to
         EUR, the catalog's base currency. Prices are converted from EUR with
-        fixed approximate rates, not live exchange rates."""
+        fixed approximate rates (not live exchange rates), then adjusted to
+        the approximate grocery price level of the currency's country
+        (e.g. CHF prices are higher than a plain conversion would give)."""
         data = self._data
         if currency is None:
             country = self._provider_locale.split("_")[-1].upper()
@@ -307,9 +333,10 @@ class GroceryStoreProvider(BaseProvider):
         code = str(currency).upper()
         if code not in data["currencies"]:
             raise ValueError(f"Unsupported currency: {currency!r} (supported: {sorted(data['currencies'])})")
+        currency_info = data["currencies"][code]
         self._currency = code
-        self._rate = data["currencies"][code]["rate"]
-        self._decimals = data["currencies"][code]["decimals"]
+        self._price_factor = currency_info["rate"] * currency_info["price_level"]
+        self._decimals = currency_info["decimals"]
 
     def grocery_currency(self, symbol=False):
         """Return the currency prices are generated in: its ISO 4217 code
@@ -325,8 +352,9 @@ class GroceryStoreProvider(BaseProvider):
         return round(amount, self._decimals) if self._decimals else int(round(amount))
 
     def _convert_price(self, eur_amount):
-        """Convert a catalog (EUR) amount to the current currency."""
-        return self._round_price(eur_amount * self._rate)
+        """Convert a catalog (EUR) amount to the current currency and its
+        country's price level."""
+        return self._round_price(eur_amount * self._price_factor)
 
     # -- price / quantity / unit ---------------------------------------------
 
@@ -361,7 +389,7 @@ class GroceryStoreProvider(BaseProvider):
             dept_id = self._resolve_department_id(department)
             if dept_id is None:
                 dept_id = int(self.random_element(list(self._data["price_ranges"].keys())))
-            min_price, max_price = (p * self._rate for p in self._data["price_ranges"][str(dept_id)])
+            min_price, max_price = (p * self._price_factor for p in self._data["price_ranges"][str(dept_id)])
         return self._round_price(self.generator.random.uniform(min_price, max_price))
 
     def quantity(self, max_quantity=10):
@@ -375,11 +403,14 @@ class GroceryStoreProvider(BaseProvider):
         among the ones plausible for that department (e.g. 'kg'/'bunch' for
         produce, 'bottle'/'L' for beverages), instead of any unit at all -
         this avoids incoherent combinations like "9 bottle x Bread"."""
-        dept_id = self._resolve_department_id(department)
+        return self._unit_label(self._random_unit_key(self._resolve_department_id(department)))
+
+    def _random_unit_key(self, dept_id=None):
         if dept_id is None:
-            unit_key = self.random_element(list(self._data["unit_labels"].keys()))
-        else:
-            unit_key = self.random_element(self._data["department_units"][str(dept_id)])
+            return self.random_element(list(self._data["unit_labels"].keys()))
+        return self.random_element(self._data["department_units"][str(dept_id)])
+
+    def _unit_label(self, unit_key):
         return self._data["unit_labels"][unit_key][self._lang]
 
     # -- grocery items / shopping lists ---------------------------------------
@@ -390,17 +421,43 @@ class GroceryStoreProvider(BaseProvider):
         _check_family_size(family_size)
         return max(2, family_size + 1)
 
-    def grocery_item(self, aisle=None, department=None, family_size=None):
+    def _measured_quantity(self, spec, family_size):
+        """A quantity for a unit sold by weight/volume (e.g. 0.85 kg, 350 g,
+        1.5 L): a multiple of spec['step'] in [min, base + per_person * family
+        size]. Without a family size, assumes a 3-person household."""
+        if family_size is not None:
+            _check_family_size(family_size)
+        people = family_size if family_size is not None else 3
+        maximum = spec["base"] + spec["per_person"] * people
+        steps = int(round((maximum - spec["min"]) / spec["step"]))
+        quantity = round(spec["min"] + spec["step"] * self.random_int(min=0, max=steps), 3)
+        return int(quantity) if isinstance(spec["step"], int) else quantity
+
+    def grocery_item(self, aisle=None, department=None, family_size=None, weighted=True):
         """Return a single random grocery list line item as a dict, with a
         unit price jittered +/-5% around the product's base price and a unit
         of measure plausible for the product's department (see `unit`).
 
+        Items sold by weight or volume (kg, g, L, mL) get a realistic
+        measured quantity (e.g. 0.85 kg, 350 g) and are priced per kg or per
+        L ('price_per'); other items are counted (1, 2, 3... articles) and
+        priced per article.
+
         `family_size` (if given) scales up the plausible quantity range
-        (bigger households buy more of a given item at once)."""
-        record = self.product_record(aisle=aisle, department=department)
-        max_quantity = self._max_quantity_for_family(family_size) if family_size is not None else 10
-        quantity = self.quantity(max_quantity=max_quantity)
-        unit = self.unit(department=record["department_id"])
+        (bigger households buy more of a given item at once). `weighted`
+        works as in `product`."""
+        record = self.product_record(aisle=aisle, department=department, weighted=weighted)
+        unit_key = self._random_unit_key(record["department_id"])
+        measure = self._data["measured_units"].get(unit_key)
+        if measure is None:
+            max_quantity = self._max_quantity_for_family(family_size) if family_size is not None else 10
+            quantity = self.quantity(max_quantity=max_quantity)
+            billed_quantity = quantity
+            price_per = self._unit_label(unit_key)
+        else:
+            quantity = self._measured_quantity(measure, family_size)
+            billed_quantity = quantity * measure["factor"]
+            price_per = self._unit_label(measure["price_per"])
         unit_price = record["price"]
         return {
             "product": record["name"],
@@ -408,35 +465,51 @@ class GroceryStoreProvider(BaseProvider):
             "aisle": record["aisle"],
             "department": record["department"],
             "quantity": quantity,
-            "unit": unit,
+            "unit": self._unit_label(unit_key),
             "unit_price": unit_price,
-            "total_price": self._round_price(quantity * unit_price),
+            "price_per": price_per,
+            "total_price": self._round_price(billed_quantity * unit_price),
             "currency": self._currency,
         }
 
-    def shopping_datetime(self, date=None, open_hour=8, close_hour=20):
+    def shopping_datetime(self, date=None, open_hour=8, close_hour=20, weighted=True):
         """Return a random datetime plausible for a shopping trip: a random
         day (within the last year) unless `date` (a date or datetime) is
         given, combined with a random time within store opening hours
-        (`open_hour` inclusive, `close_hour` exclusive, 0 <= open < close <= 24)."""
+        (`open_hour` inclusive, `close_hour` exclusive, 0 <= open < close <= 24).
+
+        By default days and hours follow the weekly pattern of the ~3.4M
+        Instacart orders (busier at weekends and in the afternoon, quiet at
+        opening time); `weighted=False` picks them uniformly."""
         if not 0 <= open_hour < close_hour <= 24:
             raise ValueError(
                 f"Invalid opening hours: open_hour={open_hour!r}, close_hour={close_hour!r} "
                 "(expected 0 <= open_hour < close_hour <= 24)"
             )
+        rng = self.generator.random
+        # order_time_weights[weekday][hour], restricted to opening hours.
+        hour_weights = [hours[open_hour:close_hour] for hours in self._data["order_time_weights"]]
         if date is None:
-            day = self.generator.date_between(start_date="-1y", end_date="today")
+            if weighted:
+                today = _datetime.date.today()
+                days = [today - _datetime.timedelta(days=n) for n in range(366)]
+                day = rng.choices(days, weights=[sum(hour_weights[d.weekday()]) for d in days])[0]
+            else:
+                day = self.generator.date_between(start_date="-1y", end_date="today")
         elif isinstance(date, _datetime.datetime):
             day = date.date()
         else:
             day = date
-        hour = self.random_int(min=open_hour, max=close_hour - 1)
+        if weighted and sum(hour_weights[day.weekday()]):
+            hour = rng.choices(range(open_hour, close_hour), weights=hour_weights[day.weekday()])[0]
+        else:
+            hour = self.random_int(min=open_hour, max=close_hour - 1)
         minute = self.random_int(min=0, max=59)
         second = self.random_int(min=0, max=59)
         return _datetime.datetime.combine(day, _datetime.time(hour, minute, second))
 
     def grocery_list(self, min_items=None, max_items=None, family_size=2, department=None,
-                      with_datetime=False, date=None):
+                      with_datetime=False, date=None, weighted=True):
         """Return a randomized shopping basket as a dict with 'items',
         'item_count', 'family_size', 'total' and 'currency'.
 
@@ -447,6 +520,9 @@ class GroceryStoreProvider(BaseProvider):
           (id or localized name).
         - `with_datetime=True` (or passing `date`) adds a 'shopping_datetime'
           field: a plausible date/time for the trip (see `shopping_datetime`).
+        - `weighted` (default True) picks popular products more often and
+          busy shopping days/hours more often (see `product` and
+          `shopping_datetime`); False makes both uniform.
         """
         _check_family_size(family_size)
         if min_items is None:
@@ -461,7 +537,7 @@ class GroceryStoreProvider(BaseProvider):
         dept_id = self._resolve_department_id(department)
         item_count = self.random_int(min=min_items, max=max_items)
         items = [
-            self.grocery_item(department=dept_id, family_size=family_size)
+            self.grocery_item(department=dept_id, family_size=family_size, weighted=weighted)
             for _ in range(item_count)
         ]
         total = self._round_price(sum(item["total_price"] for item in items))
@@ -473,5 +549,5 @@ class GroceryStoreProvider(BaseProvider):
             "currency": self._currency,
         }
         if with_datetime or date is not None:
-            result["shopping_datetime"] = self.shopping_datetime(date=date)
+            result["shopping_datetime"] = self.shopping_datetime(date=date, weighted=weighted)
         return result
