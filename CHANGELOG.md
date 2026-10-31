@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.4.0] - 2026-10-31
 
 ### Added
 - **Currency support**: prices are generated in the currency of the locale's country (`en_US` -> USD, `en_GB` -> GBP, `fr_CA` -> CAD, `ja_JP` -> JPY...; eurozone and unlisted countries -> EUR), converted from the EUR catalog with fixed approximate rates and rounded to the currency's minor unit (whole numbers for JPY/HUF). 17 currencies supported.
