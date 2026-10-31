@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `unit(aisle=...)` filter.
 - New `tin` unit ("can" / "boîte de conserve") for food cans, distinct from drink cans (`can`, "canette").
 - Seeded, reproducible test suite plus a broad invariants sweep over 240 baskets across locales; 16 new tests (97 -> 113).
+- **Type hints**: the package is fully annotated and ships a `py.typed` marker. The returned dicts are described by the new `ProductRecord`, `GroceryItem` and `GroceryList` `TypedDict`s (importable from `faker_grocery`), so editors autocomplete their keys and mypy/pyright catch typos. The README documents how to get typed results despite Faker's dynamic `fake.xxx()` methods.
+- mypy (strict) in CI and in the `dev` extra; `tests/test_typing.py` checks that the `TypedDict`s match the dicts actually returned, and that the documented typed usage type-checks (5 new tests, 113 -> 118).
+- README: documented the existing name clash with Faker's `fr_FR` / `es_CO` address providers (`department()`, `department_name()`).
 
 ### Changed
 - Grocery items no longer draw a random unit per call: they use the product's fixed unit. Per-unit quantity rules are unchanged.

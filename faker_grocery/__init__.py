@@ -19,16 +19,72 @@ import datetime as _datetime
 import itertools
 import json
 import os
+from typing import Any, NotRequired, TypedDict
 
 from faker.providers import BaseProvider
 
 __version__ = "0.5.0"
 
 _DATA_PATH = os.path.join(os.path.dirname(__file__), "data", "grocery_data.json")
-_data_cache = None
+_data_cache: dict[str, Any] | None = None
+
+# An id (int or numeric string) or a localized name, as accepted by the
+# `department=` / `aisle=` filters.
+IdOrName = int | str
 
 
-def _load_data():
+class ProductRecord(TypedDict):
+    """A product, as returned by `GroceryStoreProvider.product_record()`.
+
+    Prices are floats, or ints for currencies without minor units (JPY, HUF).
+    """
+
+    id: int
+    name: str
+    aisle_id: int
+    aisle: str
+    department_id: int
+    department: str
+    base_price: float
+    price: float
+    currency: str
+    unit: str
+    price_per: str
+
+
+class GroceryItem(TypedDict):
+    """A shopping list line, as returned by `GroceryStoreProvider.grocery_item()`.
+
+    `quantity` is an int for counted units (and g), a float for kg/L.
+    """
+
+    product: str
+    product_id: int
+    aisle: str
+    department: str
+    quantity: float
+    unit: str
+    unit_price: float
+    price_per: str
+    total_price: float
+    currency: str
+
+
+class GroceryList(TypedDict):
+    """A shopping basket, as returned by `GroceryStoreProvider.grocery_list()`.
+
+    `shopping_datetime` is only present with `with_datetime=True` or `date=`.
+    """
+
+    items: list[GroceryItem]
+    item_count: int
+    family_size: int
+    total: float
+    currency: str
+    shopping_datetime: NotRequired[_datetime.datetime]
+
+
+def _load_data() -> dict[str, Any]:
     global _data_cache
     if _data_cache is None:
         with open(_DATA_PATH, encoding="utf-8") as f:
@@ -37,7 +93,7 @@ def _load_data():
     return _data_cache
 
 
-def _build_index(raw):
+def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     languages = raw["meta"]["languages"]
     # products rows are [id, aisle_id, department_id, base_price, order_count, unit, name_<lang0>, ...]
     fields = raw["meta"]["product_fields"]
@@ -48,16 +104,16 @@ def _build_index(raw):
 
     products = raw["products"]
 
-    by_id = {}
-    by_department = {}
-    by_aisle = {}
+    by_id: dict[int, list[Any]] = {}
+    by_department: dict[int, list[list[Any]]] = {}
+    by_aisle: dict[int, list[list[Any]]] = {}
     for row in products:
         aisle_id, department_id = row[1], row[2]
         by_id[row[0]] = row
         by_aisle.setdefault(aisle_id, []).append(row)
         by_department.setdefault(department_id, []).append(row)
 
-    def cum_weights(rows):
+    def cum_weights(rows: list[list[Any]]) -> list[int]:
         # Popularity weight = number of times the product was ordered in the
         # Instacart data, +1 so never-ordered products can still come up.
         return list(itertools.accumulate(row[order_count_col] + 1 for row in rows))
@@ -93,7 +149,7 @@ def _build_index(raw):
     }
 
 
-def _generator_locale(generator, default="en_US"):
+def _generator_locale(generator: Any, default: str = "en_US") -> str:
     """Best-effort lookup of the locale a Faker generator was created with.
 
     Faker has no public API for this: the locale lives in the name-mangled
@@ -105,12 +161,12 @@ def _generator_locale(generator, default="en_US"):
     return default
 
 
-def _check_family_size(family_size):
+def _check_family_size(family_size: object) -> None:
     if isinstance(family_size, bool) or not isinstance(family_size, int) or family_size < 1:
         raise ValueError(f"family_size must be a positive integer, got {family_size!r}")
 
 
-def _is_id(value):
+def _is_id(value: object) -> bool:
     """True for an int id or a numeric string id (bools are rejected, even
     though `bool` is a subclass of `int`)."""
     if isinstance(value, bool):
@@ -128,7 +184,7 @@ class GroceryStoreProvider(BaseProvider):
     - Single grocery items and full randomized shopping lists
     """
 
-    def __init__(self, generator):
+    def __init__(self, generator: Any) -> None:
         super().__init__(generator)
         self._provider_locale = _generator_locale(generator)
 
@@ -140,37 +196,41 @@ class GroceryStoreProvider(BaseProvider):
         self.set_grocery_shopping_pattern(None)
 
     @property
-    def locale(self):
-        """The Faker locale this provider instance was created with (e.g. 'fr_FR')."""
+    def locale(self) -> str:  # type: ignore[override]
+        """The Faker locale this provider instance was created with (e.g. 'fr_FR').
+
+        NB: this property shadows BaseProvider.locale(), a method returning a
+        random locale string. Kept for backwards compatibility; on a Faker
+        instance, `fake.locale` is Faker's own attribute either way."""
         return self._provider_locale
 
     @property
-    def language(self):
+    def language(self) -> str:
         """The catalog language actually used ('en' or 'fr'), resolved from the locale."""
         return self._lang
 
     @property
-    def currency(self):
+    def currency(self) -> str:
         """The ISO 4217 code of the currency prices are generated in (e.g. 'EUR')."""
         return self._currency
 
     @property
-    def _data(self):
+    def _data(self) -> dict[str, Any]:
         return _load_data()
 
     @property
-    def departments(self):
+    def departments(self) -> dict[str, dict[str, str]]:
         """dict: department_id (str) -> {language: name}."""
         return self._data["departments"]
 
     @property
-    def aisles(self):
+    def aisles(self) -> dict[str, dict[str, Any]]:
         """dict: aisle_id (str) -> {language: name, 'department_id': int}."""
         return self._data["aisles"]
 
     # -- id resolution helpers -------------------------------------------------
 
-    def _resolve_department_id(self, department):
+    def _resolve_department_id(self, department: IdOrName | None) -> int | None:
         """Accept a department id (int/str) or a localized name and return the int id."""
         if department is None:
             return None
@@ -187,7 +247,7 @@ class GroceryStoreProvider(BaseProvider):
                     return int(dept_id)
         raise ValueError(f"Unknown department: {department!r}")
 
-    def _resolve_aisle_id(self, aisle):
+    def _resolve_aisle_id(self, aisle: IdOrName | None) -> int | None:
         """Accept an aisle id (int/str) or a localized name and return the int id."""
         if aisle is None:
             return None
@@ -206,22 +266,22 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- departments / aisles ---------------------------------------------------
 
-    def department(self):
+    def department(self) -> str:
         """Return a random department name in the current language."""
         dept_id = self.random_element(list(self.departments.keys()))
         return self.departments[dept_id][self._lang]
 
-    def department_id(self):
+    def department_id(self) -> int:
         """Return a random department id."""
         return int(self.random_element(list(self.departments.keys())))
 
-    def department_name(self, department_id):
+    def department_name(self, department_id: int | str) -> str:
         """Return the localized name of a given department id."""
         if not _is_id(department_id) or str(int(department_id)) not in self.departments:
             raise ValueError(f"Unknown department id: {department_id!r}")
         return self.departments[str(int(department_id))][self._lang]
 
-    def aisle(self, department=None):
+    def aisle(self, department: IdOrName | None = None) -> str:
         """Return a random aisle name in the current language, optionally
         restricted to a given department (id or localized name)."""
         dept_id = self._resolve_department_id(department)
@@ -234,7 +294,7 @@ class GroceryStoreProvider(BaseProvider):
             aisle_id = self.random_element(candidates)
         return self.aisles[aisle_id][self._lang]
 
-    def aisle_id(self, department=None):
+    def aisle_id(self, department: IdOrName | None = None) -> int:
         """Return a random aisle id, optionally restricted to a given department."""
         dept_id = self._resolve_department_id(department)
         if dept_id is None:
@@ -244,7 +304,7 @@ class GroceryStoreProvider(BaseProvider):
             raise ValueError(f"No aisle found for department: {department!r}")
         return self.random_element(candidates)
 
-    def aisle_name(self, aisle_id):
+    def aisle_name(self, aisle_id: int | str) -> str:
         """Return the localized name of a given aisle id."""
         if not _is_id(aisle_id) or str(int(aisle_id)) not in self.aisles:
             raise ValueError(f"Unknown aisle id: {aisle_id!r}")
@@ -252,7 +312,9 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- products -----------------------------------------------------------
 
-    def _pick_product_row(self, aisle=None, department=None, weighted=True):
+    def _pick_product_row(
+        self, aisle: IdOrName | None = None, department: IdOrName | None = None, weighted: bool = True
+    ) -> list[Any]:
         aisle_id = self._resolve_aisle_id(aisle)
         dept_id = self._resolve_department_id(department)
 
@@ -278,7 +340,9 @@ class GroceryStoreProvider(BaseProvider):
             return self.generator.random.choices(rows, cum_weights=cum_weights)[0]
         return self.generator.random.choice(rows)
 
-    def product(self, aisle=None, department=None, weighted=True):
+    def product(
+        self, aisle: IdOrName | None = None, department: IdOrName | None = None, weighted: bool = True
+    ) -> str:
         """Return a random product name in the current language, optionally
         filtered by aisle and/or department (id or localized name).
 
@@ -288,7 +352,9 @@ class GroceryStoreProvider(BaseProvider):
         row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         return row[self._data["name_col"][self._lang]]
 
-    def product_record(self, aisle=None, department=None, weighted=True):
+    def product_record(
+        self, aisle: IdOrName | None = None, department: IdOrName | None = None, weighted: bool = True
+    ) -> ProductRecord:
         """Return a full dict describing a random product: id, localized
         product/aisle/department names and their ids, its stable catalog
         'base_price' and a 'price' jittered +/-5% around it (see `price`),
@@ -298,7 +364,7 @@ class GroceryStoreProvider(BaseProvider):
         row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         return self._row_to_record(row)
 
-    def _row_to_record(self, row):
+    def _row_to_record(self, row: list[Any]) -> ProductRecord:
         product_id, aisle_id, department_id = row[0], row[1], row[2]
         base_price = self._convert_price(row[self._data["base_price_col"]])
         unit_key = row[self._data["unit_col"]]
@@ -316,12 +382,12 @@ class GroceryStoreProvider(BaseProvider):
             "price_per": self._unit_label(self._price_basis(unit_key)),
         }
 
-    def product_name(self, product_id):
+    def product_name(self, product_id: int | str) -> str:
         """Return the localized name of a given product id."""
         row = self._find_product_row(product_id)
         return row[self._data["name_col"][self._lang]]
 
-    def _find_product_row(self, product_id):
+    def _find_product_row(self, product_id: int | str) -> list[Any]:
         row = self._data["by_id"].get(int(product_id)) if _is_id(product_id) else None
         if row is None:
             raise ValueError(f"Unknown product id: {product_id!r}")
@@ -329,7 +395,7 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- currency -------------------------------------------------------------
 
-    def set_grocery_currency(self, currency=None):
+    def set_grocery_currency(self, currency: str | None = None) -> None:
         """Set the currency prices are generated in (an ISO 4217 code such as
         'USD'), or reset it to the locale's default with `None`.
 
@@ -354,7 +420,7 @@ class GroceryStoreProvider(BaseProvider):
         self._price_factor = currency_info["rate"] * price_level
         self._decimals = currency_info["decimals"]
 
-    def grocery_currency(self, symbol=False):
+    def grocery_currency(self, symbol: bool = False) -> str:
         """Return the currency prices are generated in: its ISO 4217 code
         (e.g. 'EUR'), or its symbol (e.g. '€') if `symbol` is true.
 
@@ -364,17 +430,17 @@ class GroceryStoreProvider(BaseProvider):
             return self._data["currencies"][self._currency]["symbol"]
         return self._currency
 
-    def _round_price(self, amount):
+    def _round_price(self, amount: float) -> float:
         return round(amount, self._decimals) if self._decimals else int(round(amount))
 
-    def _convert_price(self, eur_amount):
+    def _convert_price(self, eur_amount: float) -> float:
         """Convert a catalog (EUR) amount to the current currency and its
         country's price level."""
         return self._round_price(eur_amount * self._price_factor)
 
     # -- price / quantity / unit ---------------------------------------------
 
-    def _jitter_price(self, base_price, variation=0.05):
+    def _jitter_price(self, base_price: float, variation: float = 0.05) -> float:
         """Apply a random +/-`variation` fraction (default 5%) around a base
         price, so the same article's 'probable price' fluctuates a little
         each time it is priced, like real shelf prices do from day to day."""
@@ -382,7 +448,13 @@ class GroceryStoreProvider(BaseProvider):
         smallest = 10 ** -self._decimals
         return self._round_price(max(smallest, base_price * factor))
 
-    def price(self, product=None, department=None, min_price=None, max_price=None):
+    def price(
+        self,
+        product: int | str | None = None,
+        department: IdOrName | None = None,
+        min_price: float | None = None,
+        max_price: float | None = None,
+    ) -> float:
         """Return a price in the current currency (see `grocery_currency`),
         rounded to its minor unit (2 decimals, or a whole number for e.g. JPY).
 
@@ -399,7 +471,7 @@ class GroceryStoreProvider(BaseProvider):
             return self._jitter_price(self._convert_price(row[self._data["base_price_col"]]))
         if (min_price is None) != (max_price is None):
             raise ValueError("min_price and max_price must be given together")
-        if min_price is not None and min_price > max_price:
+        if min_price is not None and max_price is not None and min_price > max_price:
             raise ValueError(f"min_price ({min_price}) is greater than max_price ({max_price})")
         if min_price is None:
             dept_id = self._resolve_department_id(department)
@@ -408,11 +480,11 @@ class GroceryStoreProvider(BaseProvider):
             min_price, max_price = (p * self._price_factor for p in self._data["price_ranges"][str(dept_id)])
         return self._round_price(self.generator.random.uniform(min_price, max_price))
 
-    def quantity(self, max_quantity=10):
+    def quantity(self, max_quantity: int = 10) -> int:
         """Return a random quantity for a shopping list item (1 to `max_quantity`)."""
         return self.random_int(min=1, max=max_quantity)
 
-    def unit(self, department=None, aisle=None):
+    def unit(self, department: IdOrName | None = None, aisle: IdOrName | None = None) -> str:
         """Return a random unit of measure in the current language.
 
         If `aisle` or `department` (id or localized name) is given, the unit
@@ -428,10 +500,10 @@ class GroceryStoreProvider(BaseProvider):
             return self._unit_label(self.random_element(self._data["department_units"][str(dept_id)]))
         return self._unit_label(self.random_element(list(self._data["unit_labels"].keys())))
 
-    def _unit_label(self, unit_key):
+    def _unit_label(self, unit_key: str) -> str:
         return self._data["unit_labels"][unit_key][self._lang]
 
-    def _price_basis(self, unit_key):
+    def _price_basis(self, unit_key: str) -> str:
         """The unit a price applies to: kg/L for measured units, else the unit itself."""
         measure = self._data["measured_units"].get(unit_key)
         return measure["price_per"] if measure else unit_key
@@ -439,12 +511,12 @@ class GroceryStoreProvider(BaseProvider):
     # -- grocery items / shopping lists ---------------------------------------
 
     @staticmethod
-    def _max_quantity_for_family(family_size):
+    def _max_quantity_for_family(family_size: int) -> int:
         """Bigger households tend to buy more of a given article at once."""
         _check_family_size(family_size)
         return max(2, family_size + 1)
 
-    def _measured_quantity(self, spec, family_size):
+    def _measured_quantity(self, spec: dict[str, Any], family_size: int | None) -> float:
         """A quantity for a unit sold by weight/volume (e.g. 0.85 kg, 350 g,
         1.5 L): a multiple of spec['step'] in [min, base + per_person * family
         size]. Without a family size, assumes a 3-person household."""
@@ -456,7 +528,13 @@ class GroceryStoreProvider(BaseProvider):
         quantity = round(spec["min"] + spec["step"] * self.random_int(min=0, max=steps), 3)
         return int(quantity) if isinstance(spec["step"], int) else quantity
 
-    def grocery_item(self, aisle=None, department=None, family_size=None, weighted=True):
+    def grocery_item(
+        self,
+        aisle: IdOrName | None = None,
+        department: IdOrName | None = None,
+        family_size: int | None = None,
+        weighted: bool = True,
+    ) -> GroceryItem:
         """Return a single random grocery list line item as a dict, with a
         unit price jittered +/-5% around the product's base price and a unit
         of measure plausible for the product's department (see `unit`).
@@ -472,6 +550,7 @@ class GroceryStoreProvider(BaseProvider):
         row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         record = self._row_to_record(row)
         measure = self._data["measured_units"].get(row[self._data["unit_col"]])
+        quantity: float
         if measure is None:
             max_quantity = self._max_quantity_for_family(family_size) if family_size is not None else 10
             quantity = self.quantity(max_quantity=max_quantity)
@@ -495,7 +574,7 @@ class GroceryStoreProvider(BaseProvider):
             "currency": self._currency,
         }
 
-    def set_grocery_shopping_pattern(self, pattern=None):
+    def set_grocery_shopping_pattern(self, pattern: str | None = None) -> None:
         """Set the weekly shopping-time pattern used by `shopping_datetime`,
         or reset it to the locale's default with `None`.
 
@@ -510,11 +589,17 @@ class GroceryStoreProvider(BaseProvider):
             raise ValueError(f"Unknown shopping pattern: {pattern!r} (known: {sorted(data['shopping_patterns'])})")
         self._shopping_pattern = pattern
 
-    def grocery_shopping_pattern(self):
+    def grocery_shopping_pattern(self) -> str:
         """Return the name of the weekly shopping-time pattern in use."""
         return self._shopping_pattern
 
-    def shopping_datetime(self, date=None, open_hour=8, close_hour=20, weighted=True):
+    def shopping_datetime(
+        self,
+        date: _datetime.date | None = None,
+        open_hour: int = 8,
+        close_hour: int = 20,
+        weighted: bool = True,
+    ) -> _datetime.datetime:
         """Return a random datetime plausible for a shopping trip: a random
         day (within the last year) unless `date` (a date or datetime) is
         given, combined with a random time within store opening hours
@@ -553,8 +638,16 @@ class GroceryStoreProvider(BaseProvider):
         second = self.random_int(min=0, max=59)
         return _datetime.datetime.combine(day, _datetime.time(hour, minute, second))
 
-    def grocery_list(self, min_items=None, max_items=None, family_size=2, department=None,
-                      with_datetime=False, date=None, weighted=True):
+    def grocery_list(
+        self,
+        min_items: int | None = None,
+        max_items: int | None = None,
+        family_size: int = 2,
+        department: IdOrName | None = None,
+        with_datetime: bool = False,
+        date: _datetime.date | None = None,
+        weighted: bool = True,
+    ) -> GroceryList:
         """Return a randomized shopping basket as a dict with 'items',
         'item_count', 'family_size', 'total' and 'currency'.
 
@@ -586,7 +679,7 @@ class GroceryStoreProvider(BaseProvider):
             for _ in range(item_count)
         ]
         total = self._round_price(sum(item["total_price"] for item in items))
-        result = {
+        result: GroceryList = {
             "items": items,
             "item_count": item_count,
             "family_size": family_size,

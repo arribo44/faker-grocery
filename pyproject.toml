@@ -27,7 +27,7 @@ classifiers = [
 
 [project.optional-dependencies]
 test = ["pytest"]
-dev = ["pytest", "ruff", "build"]
+dev = ["pytest", "ruff", "build", "mypy"]
 
 [project.urls]
 Homepage = "https://github.com/arribo44/faker-grocery"
@@ -40,10 +40,22 @@ version = { attr = "faker_grocery.__version__" }
 include = ["faker_grocery*"]
 
 [tool.setuptools.package-data]
+"faker_grocery" = ["py.typed"]
 "faker_grocery.data" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+strict = true
+# The catalog is loaded from JSON into dict[str, Any]: values read from it
+# are Any by nature, and flagging every one of them would be noise.
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+# Faker ships no type information for some of its modules.
+module = ["faker.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 120
