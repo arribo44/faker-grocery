@@ -55,7 +55,7 @@ class TestDocumentedTypedUsage(unittest.TestCase):
         assert_type(basket, GroceryList)
         assert_type(basket["items"], list[GroceryItem])
         assert_type(grocery.shopping_datetime(), datetime.datetime)
-        assert_type(grocery.department(), str)
+        assert_type(grocery.grocery_department(), str)
         assert_type(grocery.department_id(), int)
 
 

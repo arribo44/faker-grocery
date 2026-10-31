@@ -50,7 +50,7 @@ fake = Faker(["fr_FR", "en_US"])
 for locale in ("fr_FR", "en_US"):
     fake[locale].add_provider(GroceryStoreProvider)
 
-fake["fr_FR"].department()              # "produits laitiers et œufs"
+fake["fr_FR"].grocery_department()      # "produits laitiers et œufs"
 ```
 
 Unknown ids/names and invalid arguments (e.g. `min_items > max_items`,
@@ -60,9 +60,9 @@ Unknown ids/names and invalid arguments (e.g. `min_items > max_items`,
 ### 🏬 Departments & aisles
 
 ```python
-fake.department()                       # "produits laitiers et œufs"
+fake.grocery_department()               # "produits laitiers et œufs"
 fake.department_id()                    # 16
-fake.department_name(16)                # "produits laitiers et œufs"
+fake.grocery_department_name(16)        # "produits laitiers et œufs"
 
 fake.aisle()                            # "yaourt"
 fake.aisle(department="produits laitiers et œufs")   # restricted to that department
@@ -70,6 +70,24 @@ fake.aisle(department=16)               # same, by id
 fake.aisle_id(department=16)            # 120
 fake.aisle_name(120)                    # "yaourt"
 ```
+
+> **Why `grocery_department()`?** Faker's own address providers already use
+> `department()` / `department_name()` for administrative departments
+> (`fr_FR`: `("18", "Cher")`, `"Sarthe"`; `es_CO`: `"Cesar"`). The store
+> methods are therefore named `grocery_department()` /
+> `grocery_department_name()`, and adding `GroceryStoreProvider` leaves
+> Faker's methods untouched:
+>
+> ```python
+> fake = Faker("fr_FR")
+> fake.add_provider(GroceryStoreProvider)
+> fake.department()                # ("18", "Cher")  - Faker's, unchanged
+> fake.grocery_department()        # "produits laitiers et œufs"
+> ```
+>
+> The former names `department()` / `department_name()` still work as
+> deprecated aliases (with a `DeprecationWarning`) in locales where they
+> don't clash, e.g. `en_US`, and will be removed in a future version.
 
 ### 🛒 Products
 
@@ -285,11 +303,6 @@ basket["items"][0]["unit_price"]         # float
 
 Prices are typed `float`; they are ints for currencies without minor units
 (JPY, HUF), which type checkers accept wherever a float is expected.
-
-> ⚠️ Name clash with Faker's own address providers: `fr_FR` (and `es_CO`)
-> already define `department()` / `department_name()` for administrative
-> departments ("Cher", "Sarthe"...). Adding `GroceryStoreProvider` replaces
-> them on that Faker instance with grocery departments.
 
 ---
 

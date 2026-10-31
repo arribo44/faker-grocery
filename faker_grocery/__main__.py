@@ -14,7 +14,7 @@ T = TypeVar("T")
 
 def distinct_sample(fake: Faker, elements: Collection[T], k: int = 5) -> list[T]:
     """k distinct elements (or all of them if there are fewer than k) -
-    plain independent draws like `fake.department()` can repeat by design,
+    plain independent draws like `fake.grocery_department()` can repeat by design,
     which is correct for actual generation but makes a "look, here are 5
     examples" demo section misleading."""
     return list(fake.random_elements(elements=list(elements), length=min(k, len(elements)), unique=True))
@@ -23,7 +23,7 @@ def distinct_sample(fake: Faker, elements: Collection[T], k: int = 5) -> list[T]
 def demo(locale: str) -> None:
     fake = Faker(locale)
     fake.add_provider(GroceryStoreProvider)
-    # Typed handle on the provider: fake.department_name() & co. are added
+    # Typed handle on the provider: fake.grocery_department_name() & co. are added
     # dynamically by Faker, so type checkers can't see their signatures.
     provider = GroceryStoreProvider(fake)
 
@@ -33,14 +33,14 @@ def demo(locale: str) -> None:
 
     print("\n--- Departments (5 distinct examples) ---")
     for dept_key in distinct_sample(fake, provider.departments.keys()):
-        print(f"  - {provider.department_name(dept_key)}")
+        print(f"  - {provider.grocery_department_name(dept_key)}")
 
     print("\n--- Aisles (5 distinct examples) ---")
     for aisle_id in distinct_sample(fake, provider.aisles.keys()):
         print(f"  - {fake.aisle_name(aisle_id)}")
 
     dept_id = provider.department_id()
-    dept_name = provider.department_name(dept_id)
+    dept_name = provider.grocery_department_name(dept_id)
     dept_aisle_ids = [a for a, info in provider.aisles.items() if info["department_id"] == dept_id]
     print(f"\n--- Aisles in department '{dept_name}' (distinct examples) ---")
     for aisle_id in distinct_sample(fake, dept_aisle_ids):

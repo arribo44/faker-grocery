@@ -49,7 +49,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertEqual(GroceryStoreProvider(fake_it).language, "en")
 
     def test_department(self):
-        dept = self.fake.department()
+        dept = self.fake.grocery_department()
         names = [info["fr"] for info in self.provider.departments.values()]
         self.assertIn(dept, names)
 
@@ -57,9 +57,9 @@ class TestGroceryStoreProvider(unittest.TestCase):
         dept_id = self.fake.department_id()
         self.assertIn(str(dept_id), self.provider.departments)
 
-    def test_department_name(self):
+    def test_grocery_department_name(self):
         for dept_id in self.provider.departments:
-            name = self.fake.department_name(dept_id)
+            name = self.fake.grocery_department_name(dept_id)
             self.assertEqual(name, self.provider.departments[dept_id]["fr"])
 
     def test_departments_property_shape(self):
@@ -120,8 +120,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for aisle_id, info in self.provider.aisles.items():
             self.assertEqual(self.fake.aisle_name(aisle_id), info["fr"])
 
-    def test_department_name_with_integer_id(self):
-        self.assertEqual(self.fake.department_name(16), self.provider.departments["16"]["fr"])
+    def test_grocery_department_name_with_integer_id(self):
+        self.assertEqual(self.fake.grocery_department_name(16), self.provider.departments["16"]["fr"])
 
     def test_department_resolution_accepts_other_language_name(self):
         # The fr_FR provider should still resolve a department given by its
@@ -497,7 +497,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
     def test_unknown_ids_raise_value_error(self):
         # Previously these leaked a bare KeyError.
         for call in [
-            lambda: self.fake.department_name(99),
+            lambda: self.fake.grocery_department_name(99),
             lambda: self.fake.aisle_name(9999),
             lambda: self.fake.unit(department=99),
             lambda: self.fake.aisle(department=99),
@@ -527,8 +527,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
         fake = Faker(["fr_FR", "en_US"])
         for locale in ("fr_FR", "en_US"):
             fake[locale].add_provider(GroceryStoreProvider)
-        self.assertIn(fake["fr_FR"].department_name(16), {self.provider.departments["16"]["fr"]})
-        self.assertIn(fake["en_US"].department_name(16), {self.provider.departments["16"]["en"]})
+        self.assertIn(fake["fr_FR"].grocery_department_name(16), {self.provider.departments["16"]["fr"]})
+        self.assertIn(fake["en_US"].grocery_department_name(16), {self.provider.departments["16"]["en"]})
 
 
     # -- currency -----------------------------------------------------------------
@@ -794,6 +794,70 @@ class TestGroceryStoreProvider(unittest.TestCase):
             dt = self.fake.shopping_datetime(open_hour=9, close_hour=12, weighted=False)
             self.assertIn(dt.hour, (9, 10, 11))
 
+
+    # -- name clash with Faker's administrative departments -------------------------
+
+    def test_fr_fr_keeps_fakers_administrative_departments(self):
+        # Faker's fr_FR address provider has department() -> ("18", "Cher")
+        # and department_name() -> "Sarthe"; adding the grocery provider must
+        # not replace them.
+        from faker.providers.address.fr_FR import Provider as FrAddressProvider
+
+        expected_departments = set(FrAddressProvider.departments)  # (code, name) tuples
+        dept = self.fake.department()
+        self.assertIsInstance(dept, tuple)
+        self.assertIn(dept, expected_departments)
+        self.assertIn(self.fake.department_name(), {name for _, name in expected_departments})
+
+    def test_es_co_keeps_fakers_administrative_departments(self):
+        from faker.providers.address.es_CO import Provider as CoAddressProvider
+
+        fake = self._faker("es_CO")
+        self.assertIn(fake.department(), CoAddressProvider.departments.values())
+
+    def test_grocery_department_names_work_in_every_locale(self):
+        for locale in ["fr_FR", "es_CO", "en_US", "de_DE"]:
+            fake = self._faker(locale)
+            lang = GroceryStoreProvider(fake).language
+            names = {info[lang] for info in self.provider.departments.values()}
+            self.assertIn(fake.grocery_department(), names, msg=locale)
+            self.assertEqual(fake.grocery_department_name(16), self.provider.departments["16"][lang], msg=locale)
+
+    def test_deprecated_aliases_still_work_without_a_clash(self):
+        fake = self._faker("en_US")  # no administrative departments in en_US
+        with self.assertWarns(DeprecationWarning):
+            dept = fake.department()
+        self.assertIn(dept, {info["en"] for info in self.provider.departments.values()})
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(fake.department_name(16), self.provider.departments["16"]["en"])
+
+    def test_deprecated_aliases_still_work_on_the_provider_itself(self):
+        # Even in fr_FR, calling the provider directly still reaches the alias.
+        with self.assertWarns(DeprecationWarning):
+            self.assertEqual(self.provider.department_name(16), self.provider.departments["16"]["fr"])
+
+    def test_aliases_hidden_only_when_they_would_clash(self):
+        self.assertNotIn("department", dir(self.provider))
+        self.assertNotIn("department_name", dir(self.provider))
+        self.assertIn("grocery_department", dir(self.provider))
+        en_provider = GroceryStoreProvider(self._faker("en_US"))
+        self.assertIn("department", dir(en_provider))
+        self.assertIn("department_name", dir(en_provider))
+
+    def test_adding_the_provider_twice_keeps_the_aliases(self):
+        # A second GroceryStoreProvider must not count as a clashing provider.
+        fake = self._faker("en_US")
+        fake.add_provider(GroceryStoreProvider)
+        with self.assertWarns(DeprecationWarning):
+            self.assertIsInstance(fake.department(), str)
+
+    def test_multi_locale_faker_keeps_each_locales_departments(self):
+        fake = Faker(["fr_FR", "en_US"])
+        for locale in ("fr_FR", "en_US"):
+            fake[locale].add_provider(GroceryStoreProvider)
+        self.assertIsInstance(fake["fr_FR"].department(), tuple)
+        self.assertEqual(fake["fr_FR"].grocery_department_name(16), self.provider.departments["16"]["fr"])
+        self.assertEqual(fake["en_US"].grocery_department_name(16), self.provider.departments["16"]["en"])
 
     # -- robustness ---------------------------------------------------------------------
 

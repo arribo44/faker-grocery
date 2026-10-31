@@ -22,13 +22,13 @@ def demo_locale(locale_name):
 
     print("\n--- 5 Random Departments ---")
     for i in range(5):
-        print(f"  {i + 1}. {fake.department()}")
+        print(f"  {i + 1}. {fake.grocery_department()}")
 
     print("\n--- 5 Random Aisles ---")
     for i in range(5):
         print(f"  {i + 1}. {fake.aisle()}")
 
-    department = fake.department()
+    department = fake.grocery_department()
     print(f"\n--- 5 Aisles restricted to department '{department}' ---")
     for i in range(5):
         print(f"  {i + 1}. {fake.aisle(department=department)}")
@@ -65,7 +65,7 @@ def demo_locale(locale_name):
     print(f"Total: {shopping_list['total']:.2f} {shopping_list['currency']}")
 
     print("\n--- Shopping list restricted to one department ---")
-    department = fake.department()
+    department = fake.grocery_department()
     shopping_list = fake.grocery_list(min_items=3, max_items=5, department=department)
     print(f"Department: {department}")
     for item in shopping_list["items"]:

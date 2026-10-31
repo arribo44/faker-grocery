@@ -19,6 +19,7 @@ import datetime as _datetime
 import itertools
 import json
 import os
+import warnings
 from typing import Any, NotRequired, TypedDict
 
 from faker.providers import BaseProvider
@@ -266,8 +267,8 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- departments / aisles ---------------------------------------------------
 
-    def department(self) -> str:
-        """Return a random department name in the current language."""
+    def grocery_department(self) -> str:
+        """Return a random (store) department name in the current language."""
         dept_id = self.random_element(list(self.departments.keys()))
         return self.departments[dept_id][self._lang]
 
@@ -275,11 +276,54 @@ class GroceryStoreProvider(BaseProvider):
         """Return a random department id."""
         return int(self.random_element(list(self.departments.keys())))
 
-    def department_name(self, department_id: int | str) -> str:
-        """Return the localized name of a given department id."""
+    def grocery_department_name(self, department_id: int | str) -> str:
+        """Return the localized name of a given (store) department id."""
         if not _is_id(department_id) or str(int(department_id)) not in self.departments:
             raise ValueError(f"Unknown department id: {department_id!r}")
         return self.departments[str(int(department_id))][self._lang]
+
+    # -- deprecated aliases -----------------------------------------------------
+    #
+    # department() / department_name() clash with Faker's own address
+    # providers, which use them for administrative departments (fr_FR:
+    # "Cher", "Sarthe"...; es_CO). Faker's add_provider() registers every
+    # public callable that dir(provider) lists, so these aliases used to
+    # silently replace Faker's methods. They are now hidden from dir() -
+    # hence not registered - whenever another provider of the same generator
+    # already defines them, and warn when called.
+
+    _DEPRECATED_ALIASES = {"department": "grocery_department", "department_name": "grocery_department_name"}
+
+    def __dir__(self) -> list[str]:
+        return [name for name in super().__dir__() if not self._alias_would_clash(name)]
+
+    def _alias_would_clash(self, name: str) -> bool:
+        if name not in self._DEPRECATED_ALIASES:
+            return False
+        providers = getattr(self.generator, "providers", [])
+        return any(
+            not isinstance(provider, GroceryStoreProvider) and callable(getattr(provider, name, None))
+            for provider in providers
+        )
+
+    def _warn_deprecated(self, name: str) -> None:
+        warnings.warn(
+            f"GroceryStoreProvider.{name}() is deprecated and will be removed in a future version, "
+            f"use {self._DEPRECATED_ALIASES[name]}() instead (the old name clashes with Faker's "
+            f"own address providers, e.g. administrative departments in fr_FR).",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+
+    def department(self) -> str:
+        """Deprecated alias of `grocery_department`."""
+        self._warn_deprecated("department")
+        return self.grocery_department()
+
+    def department_name(self, department_id: int | str) -> str:
+        """Deprecated alias of `grocery_department_name`."""
+        self._warn_deprecated("department_name")
+        return self.grocery_department_name(department_id)
 
     def aisle(self, department: IdOrName | None = None) -> str:
         """Return a random aisle name in the current language, optionally

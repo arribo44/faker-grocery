@@ -19,7 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Seeded, reproducible test suite plus a broad invariants sweep over 240 baskets across locales; 16 new tests (97 -> 113).
 - **Type hints**: the package is fully annotated and ships a `py.typed` marker. The returned dicts are described by the new `ProductRecord`, `GroceryItem` and `GroceryList` `TypedDict`s (importable from `faker_grocery`), so editors autocomplete their keys and mypy/pyright catch typos. The README documents how to get typed results despite Faker's dynamic `fake.xxx()` methods.
 - mypy (strict) in CI and in the `dev` extra; `tests/test_typing.py` checks that the `TypedDict`s match the dicts actually returned, and that the documented typed usage type-checks (5 new tests, 113 -> 118).
-- README: documented the existing name clash with Faker's `fr_FR` / `es_CO` address providers (`department()`, `department_name()`).
+- **`grocery_department()` / `grocery_department_name()`**, replacing `department()` / `department_name()` (see Fixed / Deprecated).
+- 8 new tests for the department name clash (118 -> 126).
+
+### Fixed
+- **Name clash with Faker's address providers**: `fr_FR` and `es_CO` already define `department()` (and `fr_FR` `department_name()`) for administrative departments ("Cher", "Sarthe", "Cesar"...). Adding `GroceryStoreProvider` used to silently replace them with store departments (since 0.1.0). The store methods are now `grocery_department()` / `grocery_department_name()`, and Faker's methods are left untouched.
+
+### Deprecated
+- `department()` / `department_name()`: deprecated aliases of `grocery_department()` / `grocery_department_name()`, emitting a `DeprecationWarning`. They are only registered on a Faker instance whose locale doesn't define these methods itself (e.g. `en_US`); in `fr_FR` / `es_CO`, `fake.department()` is Faker's own. They will be removed in a future version.
 
 ### Changed
 - Grocery items no longer draw a random unit per call: they use the product's fixed unit. Per-unit quantity rules are unchanged.
