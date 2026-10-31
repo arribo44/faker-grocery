@@ -38,6 +38,52 @@ def load_json(path):
         return json.load(f)
 
 
+# Punctuation that splits a product name into independently reorderable
+# segments ("Napkins, Dinner, Ultra White" -> 3 segments).
+SEGMENT_SPLIT_RE = re.compile(r"(\s*[,;/&()\-]\s*)")
+
+
+def protect_phrases(name, phrases):
+    """Swap known multi-word expressions ("gluten free", "hot dog") for
+    single placeholder words, so they are translated as a whole and moved
+    as a unit by reorder_words - instead of becoming "Gluten Sans" or, once
+    reversed, "Chien Chaud". Returns the new name and the placeholder ->
+    translation entries to add to the word dictionary."""
+    entries = {}
+    # Longest expressions first, so "extra virgin olive oil" wins over "olive oil".
+    for index, (expression, translation) in enumerate(sorted(phrases.items(), key=lambda kv: -len(kv[0]))):
+        placeholder = "qxphrase" + "".join(chr(ord("a") + int(d)) for d in str(index))
+
+        def substitute(match, placeholder=placeholder, translation=translation):
+            entries[placeholder] = translation
+            return placeholder.capitalize() if match.group(0)[0].isupper() else placeholder
+
+        name = re.sub(r"\b" + re.escape(expression) + r"\b", substitute, name, flags=re.IGNORECASE)
+    return name, entries
+
+
+def fallback_translation(name, word_dict, phrases):
+    """Translation for products without a hand-checked one: known
+    expressions first, then word-order reversal, then word substitution."""
+    name, entries = protect_phrases(name, phrases)
+    words = {**word_dict, **entries}
+    return translate_name(reorder_words(name, words), words)
+
+
+def reorder_words(name, word_dict):
+    """English puts modifiers before the noun ("White Balsamic Vinegar"),
+    French mostly after it ("Vinaigre balsamique blanc"): reverse the word
+    order of each segment - but only when every word of the segment is a
+    known dictionary word, so brand names, numbers and sizes never move."""
+    out = []
+    for segment in SEGMENT_SPLIT_RE.split(name):
+        words = segment.split()
+        if len(words) > 1 and all(re.fullmatch(r"[A-Za-z']+", w) and w.lower() in word_dict for w in words):
+            segment = " ".join(reversed(words))
+        out.append(segment)
+    return "".join(out)
+
+
 def translate_name(name, word_dict):
     """Word-by-word substitution translation, preserving punctuation/spacing
     and the original capitalization style of each translated word. Words
@@ -478,8 +524,16 @@ def main():
             departments[dept_id][lang] = translation
         for aisle_id, translation in aisle_translations.items():
             aisles[aisle_id][lang] = translation
+        # Hand-checked translations of the most ordered products (see
+        # product_names_<lang>.json) take precedence; every other product
+        # falls back to word-order reversal + word-by-word substitution.
+        names_path = os.path.join(TRANSLATIONS_DIR, f"product_names_{lang}.json")
+        curated_names = load_json(names_path) if os.path.exists(names_path) else {}
+        phrases_path = os.path.join(TRANSLATIONS_DIR, f"phrases_{lang}.json")
+        phrases = load_json(phrases_path) if os.path.exists(phrases_path) else {}
         for product in products:
-            product["name"][lang] = translate_name(product["name"]["en"], word_dict)
+            curated = curated_names.get(str(product["id"]))
+            product["name"][lang] = curated or fallback_translation(product["name"]["en"], word_dict, phrases)
 
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
 
