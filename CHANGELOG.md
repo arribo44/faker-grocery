@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Fixed unit per product, chosen per aisle**: every product now has one unit, fixed at build time among the units plausible for its aisle (new `AISLE_UNITS` table, 134 aisles: milk by the litre or bottle, spices in jars, canned goods in food cans, meat counter by kg/g...). The same product is always sold the same way; `product_record()` gained `unit` and `price_per` fields.
+- **Per-kg/L prices for measured products**: products sold by weight/volume (fresh produce, meat/seafood/cheese counters, deli, bulk, milk, juice, water, soft drinks) get their `base_price` as a price per kg or L from an aisle-specific range (`MEASURED_PRICE_RANGES`, e.g. seafood counter 12-45 EUR/kg), instead of reusing a per-article price.
+- **Country shopping patterns**: `shopping_datetime()` follows the locale country's weekly pattern: `instacart_us` (measured, default), `sunday_morning` (FR, BE, LU, ES, IT, PT: Saturday busiest, Sunday morning only) or `sunday_closed` (DE, AT, CH, PL, NO). New `grocery_shopping_pattern()` / `set_grocery_shopping_pattern(name)`.
+- **Per-country price levels**: when prices are in the locale country's own currency, the country's grocery price level is used (`COUNTRY_PRICE_LEVELS`, eurozone included: Portugal 0.82, Ireland 1.1...), instead of one level per currency.
+- `unit(aisle=...)` filter.
+- New `tin` unit ("can" / "boîte de conserve") for food cans, distinct from drink cans (`can`, "canette").
+- Seeded, reproducible test suite plus a broad invariants sweep over 240 baskets across locales; 16 new tests (97 -> 113).
+
+### Changed
+- Grocery items no longer draw a random unit per call: they use the product's fixed unit. Per-unit quantity rules are unchanged.
+- `base_price` of measured products (kg, g, L) is now a per-kg/L price; prices of all other products are unchanged in EUR.
+- Default shopping days/hours for European locales listed above changed (no more US Sunday/Monday peak).
+- `requires-python` raised to `>=3.11` (Python 3.10 reached end-of-life in October 2026); CI tests 3.11-3.14.
+- `grocery_data.json`: products rows gained a `unit` column; new `aisle_units`, `measured_price_ranges`, `country_price_levels`, `shopping_patterns`, `country_shopping_patterns` tables; `order_time_weights` moved to `shopping_patterns["instacart_us"]`; `department_units` is now derived from aisle units. **Breaking for direct data access.**
+
 ---
 
 ## [0.5.0] - 2026-10-31

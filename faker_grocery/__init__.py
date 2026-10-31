@@ -39,10 +39,11 @@ def _load_data():
 
 def _build_index(raw):
     languages = raw["meta"]["languages"]
-    # products rows are [id, aisle_id, department_id, base_price, order_count, name_<lang0>, ...]
+    # products rows are [id, aisle_id, department_id, base_price, order_count, unit, name_<lang0>, ...]
     fields = raw["meta"]["product_fields"]
     base_price_col = fields.index("base_price")
     order_count_col = fields.index("order_count")
+    unit_col = fields.index("unit")
     name_col = {lang: fields.index(f"name_{lang}") for lang in languages}
 
     products = raw["products"]
@@ -66,15 +67,20 @@ def _build_index(raw):
         "languages": languages,
         "name_col": name_col,
         "base_price_col": base_price_col,
+        "unit_col": unit_col,
         "departments": raw["departments"],
         "aisles": raw["aisles"],
         "price_ranges": raw["price_ranges"],
         "currencies": raw["currencies"],
         "country_currencies": raw["country_currencies"],
+        "country_price_levels": raw["country_price_levels"],
         "unit_labels": raw["unit_labels"],
+        "aisle_units": raw["aisle_units"],
         "department_units": raw["department_units"],
         "measured_units": raw["measured_units"],
-        "order_time_weights": raw["order_time_weights"],
+        "measured_price_ranges": raw["measured_price_ranges"],
+        "shopping_patterns": raw["shopping_patterns"],
+        "country_shopping_patterns": raw["country_shopping_patterns"],
         "products": products,
         "by_id": by_id,
         "by_department": by_department,
@@ -129,7 +135,9 @@ class GroceryStoreProvider(BaseProvider):
         data = _load_data()
         lang = self._provider_locale.split("_")[0].lower()
         self._lang = lang if lang in data["languages"] else data["meta"]["default_language"]
+        self._country = self._provider_locale.split("_")[-1].upper()
         self.set_grocery_currency(None)
+        self.set_grocery_shopping_pattern(None)
 
     @property
     def locale(self):
@@ -283,14 +291,17 @@ class GroceryStoreProvider(BaseProvider):
     def product_record(self, aisle=None, department=None, weighted=True):
         """Return a full dict describing a random product: id, localized
         product/aisle/department names and their ids, its stable catalog
-        'base_price' and a 'price' jittered +/-5% around it (see `price`).
-        `weighted` works as in `product`."""
+        'base_price' and a 'price' jittered +/-5% around it (see `price`),
+        its 'unit' and what the prices are for ('price_per': one article,
+        or one kg/L for products sold by weight/volume). `weighted` works as
+        in `product`."""
         row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
         return self._row_to_record(row)
 
     def _row_to_record(self, row):
         product_id, aisle_id, department_id = row[0], row[1], row[2]
         base_price = self._convert_price(row[self._data["base_price_col"]])
+        unit_key = row[self._data["unit_col"]]
         return {
             "id": product_id,
             "name": row[self._data["name_col"][self._lang]],
@@ -301,6 +312,8 @@ class GroceryStoreProvider(BaseProvider):
             "base_price": base_price,
             "price": self._jitter_price(base_price),
             "currency": self._currency,
+            "unit": self._unit_label(unit_key),
+            "price_per": self._unit_label(self._price_basis(unit_key)),
         }
 
     def product_name(self, product_id):
@@ -324,18 +337,21 @@ class GroceryStoreProvider(BaseProvider):
         ('en_US' -> USD, 'en_GB' -> GBP, 'fr_CA' -> CAD...), falling back to
         EUR, the catalog's base currency. Prices are converted from EUR with
         fixed approximate rates (not live exchange rates), then adjusted to
-        the approximate grocery price level of the currency's country
-        (e.g. CHF prices are higher than a plain conversion would give)."""
+        the approximate grocery price level of the locale's country when the
+        currency is that country's own (e.g. Portugal cheaper than Ireland,
+        both in EUR), or else of the currency's main country (e.g. CHF prices
+        are higher than a plain conversion would give)."""
         data = self._data
-        if currency is None:
-            country = self._provider_locale.split("_")[-1].upper()
-            currency = data["country_currencies"].get(country, data["meta"]["base_currency"])
-        code = str(currency).upper()
+        local_currency = data["country_currencies"].get(self._country, data["meta"]["base_currency"])
+        code = local_currency if currency is None else str(currency).upper()
         if code not in data["currencies"]:
             raise ValueError(f"Unsupported currency: {currency!r} (supported: {sorted(data['currencies'])})")
         currency_info = data["currencies"][code]
+        price_level = currency_info["price_level"]
+        if code == local_currency:
+            price_level = data["country_price_levels"].get(self._country, price_level)
         self._currency = code
-        self._price_factor = currency_info["rate"] * currency_info["price_level"]
+        self._price_factor = currency_info["rate"] * price_level
         self._decimals = currency_info["decimals"]
 
     def grocery_currency(self, symbol=False):
@@ -396,22 +412,29 @@ class GroceryStoreProvider(BaseProvider):
         """Return a random quantity for a shopping list item (1 to `max_quantity`)."""
         return self.random_int(min=1, max=max_quantity)
 
-    def unit(self, department=None):
+    def unit(self, department=None, aisle=None):
         """Return a random unit of measure in the current language.
 
-        If `department` (id or localized name) is given, the unit is picked
-        among the ones plausible for that department (e.g. 'kg'/'bunch' for
-        produce, 'bottle'/'L' for beverages), instead of any unit at all -
-        this avoids incoherent combinations like "9 bottle x Bread"."""
-        return self._unit_label(self._random_unit_key(self._resolve_department_id(department)))
-
-    def _random_unit_key(self, dept_id=None):
-        if dept_id is None:
-            return self.random_element(list(self._data["unit_labels"].keys()))
-        return self.random_element(self._data["department_units"][str(dept_id)])
+        If `aisle` or `department` (id or localized name) is given, the unit
+        is picked among the ones plausible for it (e.g. 'L'/'bottle' for the
+        milk aisle, 'jar' for spices), instead of any unit at all. Generated
+        products themselves always come with their own fixed unit (see
+        `product_record`)."""
+        aisle_id = self._resolve_aisle_id(aisle)
+        if aisle_id is not None:
+            return self._unit_label(self.random_element(self._data["aisle_units"][str(aisle_id)]))
+        dept_id = self._resolve_department_id(department)
+        if dept_id is not None:
+            return self._unit_label(self.random_element(self._data["department_units"][str(dept_id)]))
+        return self._unit_label(self.random_element(list(self._data["unit_labels"].keys())))
 
     def _unit_label(self, unit_key):
         return self._data["unit_labels"][unit_key][self._lang]
+
+    def _price_basis(self, unit_key):
+        """The unit a price applies to: kg/L for measured units, else the unit itself."""
+        measure = self._data["measured_units"].get(unit_key)
+        return measure["price_per"] if measure else unit_key
 
     # -- grocery items / shopping lists ---------------------------------------
 
@@ -438,28 +461,26 @@ class GroceryStoreProvider(BaseProvider):
         unit price jittered +/-5% around the product's base price and a unit
         of measure plausible for the product's department (see `unit`).
 
-        Items sold by weight or volume (kg, g, L, mL) get a realistic
-        measured quantity (e.g. 0.85 kg, 350 g) and are priced per kg or per
-        L ('price_per'); other items are counted (1, 2, 3... articles) and
-        priced per article.
+        The unit is the product's own (fixed) unit. Items sold by weight or
+        volume (kg, g, L) get a realistic measured quantity (e.g. 0.85 kg,
+        350 g) and are priced per kg or per L ('price_per'); other items are
+        counted (1, 2, 3... articles) and priced per article.
 
         `family_size` (if given) scales up the plausible quantity range
         (bigger households buy more of a given item at once). `weighted`
         works as in `product`."""
-        record = self.product_record(aisle=aisle, department=department, weighted=weighted)
-        unit_key = self._random_unit_key(record["department_id"])
-        measure = self._data["measured_units"].get(unit_key)
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted)
+        record = self._row_to_record(row)
+        measure = self._data["measured_units"].get(row[self._data["unit_col"]])
         if measure is None:
             max_quantity = self._max_quantity_for_family(family_size) if family_size is not None else 10
             quantity = self.quantity(max_quantity=max_quantity)
             billed_quantity = quantity
-            price_per = self._unit_label(unit_key)
         else:
             quantity = self._measured_quantity(measure, family_size)
             # Rounded so e.g. 450 g -> 0.45 kg exactly, not 0.45000000000000001
             # (which could tip a half-cent total the other way).
             billed_quantity = round(quantity * measure["factor"], 6)
-            price_per = self._unit_label(measure["price_per"])
         unit_price = record["price"]
         return {
             "product": record["name"],
@@ -467,12 +488,31 @@ class GroceryStoreProvider(BaseProvider):
             "aisle": record["aisle"],
             "department": record["department"],
             "quantity": quantity,
-            "unit": self._unit_label(unit_key),
+            "unit": record["unit"],
             "unit_price": unit_price,
-            "price_per": price_per,
+            "price_per": record["price_per"],
             "total_price": self._round_price(billed_quantity * unit_price),
             "currency": self._currency,
         }
+
+    def set_grocery_shopping_pattern(self, pattern=None):
+        """Set the weekly shopping-time pattern used by `shopping_datetime`,
+        or reset it to the locale's default with `None`.
+
+        Patterns: 'instacart_us' (measured on ~3.4M US online orders; the
+        default for most locales), 'sunday_morning' (shops open on Sunday
+        morning only: fr_FR, fr_BE, es_ES, it_IT...) and 'sunday_closed'
+        (de_DE, de_AT, de_CH, pl_PL...)."""
+        data = self._data
+        if pattern is None:
+            pattern = data["country_shopping_patterns"].get(self._country, data["meta"]["default_shopping_pattern"])
+        if pattern not in data["shopping_patterns"]:
+            raise ValueError(f"Unknown shopping pattern: {pattern!r} (known: {sorted(data['shopping_patterns'])})")
+        self._shopping_pattern = pattern
+
+    def grocery_shopping_pattern(self):
+        """Return the name of the weekly shopping-time pattern in use."""
+        return self._shopping_pattern
 
     def shopping_datetime(self, date=None, open_hour=8, close_hour=20, weighted=True):
         """Return a random datetime plausible for a shopping trip: a random
@@ -480,17 +520,20 @@ class GroceryStoreProvider(BaseProvider):
         given, combined with a random time within store opening hours
         (`open_hour` inclusive, `close_hour` exclusive, 0 <= open < close <= 24).
 
-        By default days and hours follow the weekly pattern of the ~3.4M
-        Instacart orders (busier at weekends and in the afternoon, quiet at
-        opening time); `weighted=False` picks them uniformly."""
+        By default days and hours follow the locale's weekly shopping pattern
+        (see `set_grocery_shopping_pattern`): busier days and hours come up
+        more often, and days a pattern has shops closed never come up unless
+        `date` forces one (its time is then uniform within opening hours).
+        `weighted=False` picks days and hours uniformly."""
         if not 0 <= open_hour < close_hour <= 24:
             raise ValueError(
                 f"Invalid opening hours: open_hour={open_hour!r}, close_hour={close_hour!r} "
                 "(expected 0 <= open_hour < close_hour <= 24)"
             )
         rng = self.generator.random
-        # order_time_weights[weekday][hour], restricted to opening hours.
-        hour_weights = [hours[open_hour:close_hour] for hours in self._data["order_time_weights"]]
+        # pattern[weekday][hour], restricted to opening hours.
+        pattern = self._data["shopping_patterns"][self._shopping_pattern]
+        hour_weights = [hours[open_hour:close_hour] for hours in pattern]
         if date is None:
             if weighted:
                 today = _datetime.date.today()

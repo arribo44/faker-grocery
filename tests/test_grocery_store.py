@@ -11,6 +11,10 @@ from faker_grocery import GroceryStoreProvider
 
 class TestGroceryStoreProvider(unittest.TestCase):
     def setUp(self):
+        # Fixed seed: every test sees the same draws on every run, so a
+        # failure is reproducible instead of showing up once in a while
+        # (broad randomized coverage lives in test_invariants_over_many_draws).
+        Faker.seed(20261031)
         self.fake = Faker("fr_FR")
         self.fake.add_provider(GroceryStoreProvider)
         self.provider = GroceryStoreProvider(self.fake)
@@ -320,15 +324,33 @@ class TestGroceryStoreProvider(unittest.TestCase):
     # kind of cross-field coherence that's easy to lose when values are
     # generated independently.
 
-    def test_every_product_base_price_is_within_its_department_range(self):
-        price_ranges = self.provider._data["price_ranges"]
+    def eur_price_range(self, row):
+        """The EUR range a product's base_price comes from: its aisle's per-kg/L
+        range if sold by weight/volume, else its department's per-article range."""
+        data = self.provider._data
+        if row[data["unit_col"]] in data["measured_units"]:
+            return self.provider._data["measured_price_ranges"][str(row[1])]
+        return data["price_ranges"][str(row[2])]
+
+    def test_every_product_base_price_is_within_its_price_range(self):
         base_price_col = self.provider._data["base_price_col"]
         for row in self.provider._data["products"]:
-            department_id = row[2]
-            low, high = price_ranges[str(department_id)]
+            low, high = self.eur_price_range(row)
             base_price = row[base_price_col]
             self.assertGreaterEqual(base_price, low, msg=row)
             self.assertLessEqual(base_price, high, msg=row)
+
+    def test_every_product_unit_is_one_of_its_aisle_units(self):
+        data = self.provider._data
+        for row in data["products"]:
+            self.assertIn(row[data["unit_col"]], data["aisle_units"][str(row[1])], msg=row)
+
+    def test_measured_units_only_in_aisles_with_a_per_kg_range(self):
+        data = self.provider._data
+        ranges = self.provider._data["measured_price_ranges"]
+        for aisle_id, units in data["aisle_units"].items():
+            if set(units) & set(data["measured_units"]):
+                self.assertIn(aisle_id, ranges)
 
     def test_every_product_department_matches_its_aisle_department(self):
         aisles = self.provider.aisles
@@ -360,11 +382,10 @@ class TestGroceryStoreProvider(unittest.TestCase):
             item = self.fake.grocery_item(department=dept_id)
             self.assertIn(item["unit"], expected_labels)
 
-    def test_grocery_item_price_is_consistent_with_its_department_range(self):
-        price_ranges = self.provider._data["price_ranges"]
+    def test_grocery_item_price_is_consistent_with_its_price_range(self):
         for dept_id in self.provider.departments:
-            low, high = price_ranges[dept_id]
             item = self.fake.grocery_item(department=dept_id)
+            low, high = self.eur_price_range(self.provider._data["by_id"][item["product_id"]])
             # unit_price is base_price jittered +/-5%, and base_price itself
             # is bounded by [low, high] - allow a small rounding margin.
             self.assertGreaterEqual(item["unit_price"], round(low * 0.94, 2))
@@ -381,12 +402,35 @@ class TestGroceryStoreProvider(unittest.TestCase):
             self.assertEqual(record["department"], department_info["fr"])
             self.assertEqual(aisle_info["department_id"], record["department_id"])
 
+    def test_product_unit_is_fixed(self):
+        # A given product is always sold in the same unit.
+        units = {}
+        for _ in range(500):
+            item = self.fake.grocery_item(department=4)  # produce
+            units.setdefault(item["product_id"], set()).add(item["unit"])
+        self.assertTrue(all(len(u) == 1 for u in units.values()))
+
+    def test_product_record_has_unit_and_price_basis(self):
+        for _ in range(50):
+            record = self.fake.product_record()
+            self.assertIn("unit", record)
+            self.assertIn(record["price_per"], {record["unit"], "kg", "L"})
+
+    def test_food_cans_and_drink_cans_are_distinct(self):
+        labels = self.provider._data["unit_labels"]
+        self.assertEqual(labels["tin"]["fr"], "boîte de conserve")
+        self.assertEqual(labels["can"]["fr"], "canette")
+        self.assertEqual(self.fake.unit(aisle=59), "boîte de conserve")  # canned meals beans
+
+    def test_unit_with_aisle_filter(self):
+        for _ in range(20):
+            self.assertEqual(self.fake.unit(aisle=104), "pot")  # spices: jars only
+
     def test_grocery_list_department_filter_is_fully_consistent(self):
         # Every field of every item (aisle, department, unit, price) must be
         # coherent with the single department the whole basket was
         # restricted to - not just the 'department' label.
         dept_id = "12"  # meat seafood
-        low, high = self.provider._data["price_ranges"][dept_id]
         expected_unit_labels = {
             self.provider._data["unit_labels"][k]["fr"]
             for k in self.provider._data["department_units"][dept_id]
@@ -395,6 +439,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for item in shopping_list["items"]:
             self.assertEqual(item["department"], self.provider.departments[dept_id]["fr"])
             self.assertIn(item["unit"], expected_unit_labels)
+            low, high = self.eur_price_range(self.provider._data["by_id"][item["product_id"]])
             self.assertGreaterEqual(item["unit_price"], round(low * 0.94, 2))
             self.assertLessEqual(item["unit_price"], round(high * 1.06, 2))
             self.assertEqual(item["total_price"], round(self.billed_quantity(item) * item["unit_price"], 2))
@@ -580,6 +625,26 @@ class TestGroceryStoreProvider(unittest.TestCase):
             if eur_base >= 1:
                 self.assertGreater(record["base_price"], round(eur_base * info["rate"], 2))
 
+    def test_country_price_level_varies_within_the_eurozone(self):
+        # Same EUR currency, different countries: Portugal cheaper, Ireland dearer.
+        levels = self.provider._data["country_price_levels"]
+        base_price_col = self.provider._data["base_price_col"]
+        for locale, country in [("pt_PT", "PT"), ("en_IE", "IE"), ("fr_FR", "FR")]:
+            fake = self._faker(locale)
+            self.assertEqual(fake.grocery_currency(), "EUR")
+            record = fake.product_record()
+            eur_base = self.provider._data["by_id"][record["id"]][base_price_col]
+            self.assertEqual(record["base_price"], round(eur_base * levels[country], 2), msg=locale)
+
+    def test_overridden_currency_uses_its_own_price_level(self):
+        # A Portuguese locale priced in USD gets US prices, not Portuguese ones.
+        fake = self._faker("pt_PT")
+        fake.set_grocery_currency("USD")
+        base_price_col = self.provider._data["base_price_col"]
+        record = fake.product_record()
+        eur_base = self.provider._data["by_id"][record["id"]][base_price_col]
+        self.assertEqual(record["base_price"], round(eur_base * self.price_factor("USD"), 2))
+
     def test_every_currency_has_a_positive_price_level(self):
         for code, info in self.provider._data["currencies"].items():
             self.assertGreater(info["price_level"], 0, msg=code)
@@ -587,14 +652,14 @@ class TestGroceryStoreProvider(unittest.TestCase):
 
     # -- measured quantities --------------------------------------------------------
 
-    def _items_with_unit(self, unit_key, department, family_size=None, n=200):
+    def _items_with_unit(self, unit_key, aisle, family_size=None, n=200):
         label = self.provider._data["unit_labels"][unit_key]["fr"]
-        items = [self.fake.grocery_item(department=department, family_size=family_size) for _ in range(n)]
+        items = [self.fake.grocery_item(aisle=aisle, family_size=family_size) for _ in range(n)]
         return [item for item in items if item["unit"] == label]
 
     def test_weight_quantities_are_realistic_and_priced_per_kg(self):
         spec = self.provider._data["measured_units"]["kg"]
-        items = self._items_with_unit("kg", department=4, family_size=2)  # produce
+        items = self._items_with_unit("kg", aisle=24, family_size=2)  # fresh fruits
         self.assertTrue(items)
         for item in items:
             self.assertIsInstance(item["quantity"], float)
@@ -605,7 +670,7 @@ class TestGroceryStoreProvider(unittest.TestCase):
 
     def test_gram_quantities_are_whole_steps_priced_per_kg(self):
         spec = self.provider._data["measured_units"]["g"]
-        items = self._items_with_unit("g", department=4)
+        items = self._items_with_unit("g", aisle=96)  # lunch meat
         self.assertTrue(items)
         for item in items:
             self.assertIsInstance(item["quantity"], int)
@@ -614,11 +679,19 @@ class TestGroceryStoreProvider(unittest.TestCase):
             self.assertEqual(item["total_price"], round(item["quantity"] / 1000 * item["unit_price"], 2))
 
     def test_volume_quantities_are_priced_per_litre(self):
-        items = self._items_with_unit("ml", department=7)  # beverages
+        items = self._items_with_unit("l", aisle=84)  # milk
         self.assertTrue(items)
         for item in items:
             self.assertEqual(item["price_per"], "L")
-            self.assertEqual(item["total_price"], round(item["quantity"] / 1000 * item["unit_price"], 2))
+            self.assertEqual(item["total_price"], round(item["quantity"] * item["unit_price"], 2))
+
+    def test_per_kg_prices_are_realistic_for_their_aisle(self):
+        # 200 g of seafood is priced from a seafood per-kg range, not as a
+        # fraction of an arbitrary per-article price.
+        low, high = self.provider._data["measured_price_ranges"]["39"]  # seafood counter
+        for item in self._items_with_unit("kg", aisle=39) + self._items_with_unit("g", aisle=39):
+            self.assertGreaterEqual(item["unit_price"], round(low * 0.94, 2))
+            self.assertLessEqual(item["unit_price"], round(high * 1.06, 2))
 
     def test_counted_items_are_priced_per_article(self):
         for _ in range(30):
@@ -627,8 +700,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
             self.assertEqual(item["price_per"], item["unit"])
 
     def test_measured_quantities_scale_with_family_size(self):
-        small = [i["quantity"] for i in self._items_with_unit("kg", department=4, family_size=1, n=300)]
-        big = [i["quantity"] for i in self._items_with_unit("kg", department=4, family_size=8, n=300)]
+        small = [i["quantity"] for i in self._items_with_unit("kg", aisle=24, family_size=1, n=300)]
+        big = [i["quantity"] for i in self._items_with_unit("kg", aisle=24, family_size=8, n=300)]
         self.assertLess(max(small), max(big))
 
     # -- popularity weighting -----------------------------------------------------
@@ -657,15 +730,51 @@ class TestGroceryStoreProvider(unittest.TestCase):
 
     # -- realistic shopping times -----------------------------------------------------
 
-    def test_order_time_weights_shape(self):
-        weights = self.provider._data["order_time_weights"]
-        self.assertEqual(len(weights), 7)
-        for hours in weights:
-            self.assertEqual(len(hours), 24)
+    def test_shopping_patterns_shape(self):
+        for name, weights in self.provider._data["shopping_patterns"].items():
+            self.assertEqual(len(weights), 7, msg=name)
+            for hours in weights:
+                self.assertEqual(len(hours), 24, msg=name)
+
+    def test_shopping_pattern_follows_locale_country(self):
+        expected = {"fr_FR": "sunday_morning", "es_ES": "sunday_morning", "de_DE": "sunday_closed",
+                    "de_CH": "sunday_closed", "en_US": "instacart_us", "en_GB": "instacart_us"}
+        for locale, pattern in expected.items():
+            self.assertEqual(self._faker(locale).grocery_shopping_pattern(), pattern, msg=locale)
+
+    def test_set_grocery_shopping_pattern_overrides_and_resets(self):
+        self.fake.set_grocery_shopping_pattern("sunday_closed")
+        self.assertEqual(self.fake.grocery_shopping_pattern(), "sunday_closed")
+        self.fake.set_grocery_shopping_pattern(None)
+        self.assertEqual(self.fake.grocery_shopping_pattern(), "sunday_morning")
+        with self.assertRaises(ValueError):
+            self.fake.set_grocery_shopping_pattern("nope")
+
+    def test_sunday_closed_pattern_never_shops_on_sunday(self):
+        fake = self._faker("de_DE")
+        for _ in range(500):
+            self.assertNotEqual(fake.shopping_datetime().weekday(), 6)
+
+    def test_sunday_morning_pattern_never_shops_on_sunday_afternoon(self):
+        sundays = [dt for dt in (self.fake.shopping_datetime() for _ in range(2000)) if dt.weekday() == 6]
+        self.assertTrue(sundays)
+        self.assertTrue(all(dt.hour < 13 for dt in sundays))
+
+    def test_sunday_morning_pattern_busiest_on_saturday(self):
+        weekdays = [self.fake.shopping_datetime().weekday() for _ in range(3000)]
+        self.assertEqual(max(range(7), key=weekdays.count), 5)
+
+    def test_forced_closed_day_falls_back_to_opening_hours(self):
+        fake = self._faker("de_DE")
+        sunday = datetime.date(2025, 6, 1)
+        for _ in range(50):
+            dt = fake.shopping_datetime(date=sunday)
+            self.assertEqual(dt.date(), sunday)
+            self.assertTrue(8 <= dt.hour < 20)
 
     def test_weighted_shopping_hours_avoid_quiet_opening_time(self):
         # Instacart orders are much rarer at 8h than mid-afternoon.
-        Faker.seed(3)
+        self.fake.set_grocery_shopping_pattern("instacart_us")
         hours = [self.fake.shopping_datetime(date=datetime.date(2025, 6, 1)).hour for _ in range(2000)]
         self.assertGreater(hours.count(14), hours.count(8))
         for hour in hours:
@@ -673,10 +782,10 @@ class TestGroceryStoreProvider(unittest.TestCase):
             self.assertLess(hour, 20)
 
     def test_weighted_shopping_days_follow_the_weekly_pattern(self):
-        weights = self.provider._data["order_time_weights"]
+        self.fake.set_grocery_shopping_pattern("instacart_us")
+        weights = self.provider._data["shopping_patterns"]["instacart_us"]
         day_totals = [sum(hours[8:20]) for hours in weights]
         busiest, quietest = day_totals.index(max(day_totals)), day_totals.index(min(day_totals))
-        Faker.seed(5)
         weekdays = [self.fake.shopping_datetime().weekday() for _ in range(3000)]
         self.assertGreater(weekdays.count(busiest), weekdays.count(quietest))
 
@@ -684,6 +793,38 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for _ in range(50):
             dt = self.fake.shopping_datetime(open_hour=9, close_hour=12, weighted=False)
             self.assertIn(dt.hour, (9, 10, 11))
+
+
+    # -- robustness ---------------------------------------------------------------------
+
+    def test_invariants_over_many_draws(self):
+        # Broad randomized sweep (but seeded, so reproducible): many baskets
+        # across locales, currencies and patterns must all stay internally
+        # consistent. Catches rare edge cases (rounding, empty ranges...)
+        # that a handful of draws would miss.
+        data = self.provider._data
+        for locale in ["fr_FR", "en_US", "de_DE", "ja_JP", "pt_PT", "fr_CH"]:
+            fake = self._faker(locale)
+            provider = GroceryStoreProvider(fake)
+            lang, decimals = provider.language, data["currencies"][provider.currency]["decimals"]
+            pattern = data["shopping_patterns"][fake.grocery_shopping_pattern()]
+            for seed in range(40):
+                Faker.seed(seed)
+                basket = fake.grocery_list(family_size=1 + seed % 6, with_datetime=True)
+                self.assertEqual(basket["total"], round(sum(i["total_price"] for i in basket["items"]), decimals))
+                dt = basket["shopping_datetime"]
+                self.assertTrue(8 <= dt.hour < 20)
+                self.assertGreater(pattern[dt.weekday()][dt.hour], 0, msg=(locale, dt))
+                for item in basket["items"]:
+                    row = data["by_id"][item["product_id"]]
+                    unit_key = row[data["unit_col"]]
+                    self.assertEqual(item["unit"], data["unit_labels"][unit_key][lang])
+                    self.assertIn(unit_key, data["aisle_units"][str(row[1])])
+                    measure = data["measured_units"].get(unit_key)
+                    billed = round(item["quantity"] * measure["factor"], 6) if measure else item["quantity"]
+                    self.assertGreater(item["quantity"], 0)
+                    self.assertGreater(item["unit_price"], 0)
+                    self.assertEqual(item["total_price"], round(billed * item["unit_price"], decimals))
 
 
 if __name__ == "__main__":
