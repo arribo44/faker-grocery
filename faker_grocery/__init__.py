@@ -214,6 +214,7 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     unit_col = fields.index("unit")
     size_col = fields.index("size")
     season_col = fields.index("season")
+    reorder_count_col = fields.index("reorder_count")
     # Only the source language is in the main file; the others are added by
     # _ensure_language() on first use.
     name_col = {lang: fields.index(f"name_{lang}") for lang in languages if f"name_{lang}" in fields}
@@ -247,6 +248,7 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
         "unit_col": unit_col,
         "size_col": size_col,
         "season_col": season_col,
+        "reorder_count_col": reorder_count_col,
         "departments": raw["departments"],
         "aisles": raw["aisles"],
         "price_ranges": raw["price_ranges"],
@@ -269,6 +271,9 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
         "country_vat": raw["country_vat"],
         "aisle_tax_class": raw["aisle_tax_class"],
         "complements": complements,
+        "basket_sizes": raw["basket_sizes"],
+        "customer_intervals": raw["customer_intervals"],
+        "customer_reorder_rates": raw["customer_reorder_rates"],
         "store_name_templates": raw["store_name_templates"],
         "promotion_labels": raw["promotion_labels"],
         # Total popularity of each department / aisle, for weighted picks.
@@ -961,18 +966,28 @@ class GroceryStoreProvider(BaseProvider):
         second = self.random_int(min=0, max=59)
         return _datetime.datetime.combine(day, _datetime.time(hour, minute, second))
 
-    def _default_item_range(
-        self, family_size: int, min_items: int | None, max_items: int | None
-    ) -> tuple[int, int]:
-        if min_items is None:
-            min_items = max(3, 4 + 3 * (family_size - 1))
-            if max_items is not None:
-                min_items = min(min_items, max(max_items, 0))
-        if max_items is None:
-            max_items = max(min_items + 3, 10 + 5 * (family_size - 1))
-        if min_items < 0 or min_items > max_items:
-            raise ValueError(f"Invalid item-count range: min_items={min_items!r}, max_items={max_items!r}")
-        return min_items, max_items
+    def _item_count(self, family_size: int, min_items: int | None, max_items: int | None) -> int:
+        """Number of items in a basket. With both bounds given: uniform in
+        [min_items, max_items]. Otherwise drawn from the distribution of
+        Instacart basket sizes (many small baskets, a few very big ones;
+        ~10 items on average), scaled by household size (x0.8 for one
+        person, x1 for a couple, +20% per extra person), then clamped to
+        the bound given, if any."""
+        for name, bound in (("min_items", min_items), ("max_items", max_items)):
+            if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int) or bound < 0):
+                raise ValueError(f"{name} must be a non-negative integer, got {bound!r}")
+        if min_items is not None and max_items is not None:
+            if min_items > max_items:
+                raise ValueError(f"Invalid item-count range: min_items={min_items!r}, max_items={max_items!r}")
+            return self.random_int(min=min_items, max=max_items)
+        sizes = self._data["basket_sizes"]
+        drawn = self.generator.random.choices([s for s, _ in sizes], weights=[w for _, w in sizes])[0]
+        count = max(1, round(drawn * (0.6 + 0.2 * family_size)))
+        if min_items is not None:
+            count = max(count, min_items)
+        if max_items is not None:
+            count = min(count, max_items)
+        return count
 
     def _basket_items(
         self,
@@ -1027,11 +1042,10 @@ class GroceryStoreProvider(BaseProvider):
         """Return a randomized shopping basket as a dict with 'items',
         'item_count', 'family_size', 'total' and 'currency'.
 
-        - `family_size` (default 2, a couple) scales the default item-count
-          range and how much of each item is bought, when `min_items` /
-          `max_items` are not given explicitly. A default bound is adjusted
-          to the other bound if that one is given (`max_items=2` alone gives
-          baskets of up to 2 items, not an error).
+        - The number of items follows the distribution of real (Instacart)
+          basket sizes, scaled by `family_size` (default 2, a couple), which
+          also scales how much of each item is bought. `min_items` /
+          `max_items` clamp it; with both, the count is uniform between them.
         - `department` optionally restricts every item to one department
           (id or localized name).
         - `with_datetime=True` (or passing `date`) adds a 'shopping_datetime'
@@ -1045,7 +1059,7 @@ class GroceryStoreProvider(BaseProvider):
           the item count.
         """
         _check_family_size(family_size)
-        min_items, max_items = self._default_item_range(family_size, min_items, max_items)
+        item_count = self._item_count(family_size, min_items, max_items)
 
         # Resolve once (and fail fast on an unknown department) rather than
         # re-resolving a department name for every item.
@@ -1054,7 +1068,6 @@ class GroceryStoreProvider(BaseProvider):
             self.shopping_datetime(date=date, weighted=weighted) if with_datetime or date is not None else None
         )
         month = shopping_dt.month if shopping_dt is not None else None
-        item_count = self.random_int(min=min_items, max=max_items)
         items = self._basket_items(item_count, family_size, dept_id, weighted, month, coherent)
         result: GroceryList = {
             "items": items,
@@ -1071,29 +1084,43 @@ class GroceryStoreProvider(BaseProvider):
 
     def customer_profile(self, family_size: int | None = None) -> CustomerProfile:
         """Return a recurring customer: id, name, household size, favorite
-        products (popular products they re-order), how often they shop
-        (in days) and the share of their basket that is re-orders.
-        Instacart-like orders of magnitude: weekly shopping is the most
-        common, and about 60% of items are re-orders."""
+        products, how often they shop (in days) and the share of their
+        basket that is re-orders of their favorites.
+
+        Measured on the Instacart customers: the shopping interval follows
+        the distribution of customers' median days between orders (weekly
+        and monthly most common), the re-order share the distribution of
+        their re-ordered items (~45% on average), and favorites are picked
+        in proportion to how often products are re-ordered (milk, bananas
+        and eggs rather than one-off purchases)."""
         rng = self.generator.random
         if family_size is None:
             family_size = rng.choices([1, 2, 3, 4, 5], weights=[30, 35, 15, 15, 5])[0]
         _check_family_size(family_size)
+        data = self._data
+        if "reorder_cum_weights" not in data:
+            data["reorder_cum_weights"] = list(
+                itertools.accumulate(row[data["reorder_count_col"]] + 1 for row in data["products"])
+            )
         favorites: list[int] = []
         target = 8 + 4 * family_size
         for _ in range(target * 10):
-            product_id = self._pick_product_row()[0]
+            product_id = rng.choices(data["products"], cum_weights=data["reorder_cum_weights"])[0][0]
             if product_id not in favorites:
                 favorites.append(product_id)
             if len(favorites) == target:
                 break
+        intervals, reorder_rates = data["customer_intervals"], data["customer_reorder_rates"]
+        interval = rng.choices([d for d, _ in intervals], weights=[w for _, w in intervals])[0]
+        reorder_pct = rng.choices([p for p, _ in reorder_rates], weights=[w for _, w in reorder_rates])[0]
+        reorder_rate = min(1.0, max(0.0, reorder_pct / 100 + rng.uniform(-0.025, 0.025)))
         return {
             "customer_id": self.random_int(min=100000, max=999999),
             "name": self.generator.name(),
             "family_size": family_size,
             "favorite_product_ids": favorites,
-            "shopping_interval_days": rng.choices([3, 4, 5, 7, 10, 14, 21, 30], weights=[5, 6, 6, 25, 12, 20, 8, 8])[0],
-            "reorder_rate": round(rng.uniform(0.4, 0.75), 2),
+            "shopping_interval_days": max(1, interval),
+            "reorder_rate": round(reorder_rate, 2),
         }
 
     def customer_history(
@@ -1125,11 +1152,10 @@ class GroceryStoreProvider(BaseProvider):
             day -= _datetime.timedelta(days=max(1, interval + jitter))
         favorites = [self._find_product_row(product_id) for product_id in customer["favorite_product_ids"]]
         family_size = customer["family_size"]
-        min_items, max_items = self._default_item_range(family_size, None, None)
         baskets: list[GroceryList] = []
         for day in reversed(days):
             shopping_dt = self.shopping_datetime(date=day, weighted=weighted)
-            item_count = self.random_int(min=min_items, max=max_items)
+            item_count = self._item_count(family_size, None, None)
             items = self._basket_items(
                 item_count, family_size, None, weighted, shopping_dt.month, coherent,
                 favorites=favorites, reorder_rate=customer["reorder_rate"],

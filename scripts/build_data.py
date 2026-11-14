@@ -15,7 +15,6 @@ import random
 import re
 
 from store_tables import (
-    AISLE_COMPLEMENTS,
     AISLE_SIZES,
     COUNTRY_OPENING_HOURS,
     COUNTRY_VAT,
@@ -659,9 +658,63 @@ def load_order_time_weights():
 
 
 def load_product_popularity():
-    """product_id -> number of times it was ordered (absent: never ordered)."""
+    """product_id -> (times it was ordered, times it was re-ordered by the
+    same customer); absent: never ordered."""
     with open(os.path.join(DATAS_DIR, "product_popularity.csv"), encoding="utf-8") as f:
-        return {int(row["product_id"]): int(row["order_count"]) for row in csv.DictReader(f)}
+        return {
+            int(row["product_id"]): (int(row["order_count"]), int(row["reorder_count"]))
+            for row in csv.DictReader(f)
+        }
+
+
+def load_counts(name, key_col, count_col="order_count"):
+    with open(os.path.join(DATAS_DIR, name), encoding="utf-8") as f:
+        return [[int(row[key_col]), int(row[count_col])] for row in csv.DictReader(f)]
+
+
+# Complementary aisles (coherent baskets), from the Instacart co-purchase
+# statistics: aisle B complements aisle A when orders containing A contain B
+# at least COMPLEMENT_MIN_LIFT times as often as orders in general, and at
+# least COMPLEMENT_MIN_EXCESS more often in absolute terms (so rare aisles
+# with a high lift don't qualify). The probability of adding B after an item
+# from A is that excess P(B|A) - P(B), capped; at most COMPLEMENT_MAX per aisle.
+COMPLEMENT_MIN_LIFT = 2.0
+COMPLEMENT_MIN_EXCESS = 0.03
+COMPLEMENT_MAX = 3
+COMPLEMENT_MAX_PROBABILITY = 0.4
+COMPLEMENT_MIN_ORDERS = 2000
+
+
+def merge_tail(counts, limit):
+    """[[value, count], ...] with every value above `limit` merged into it."""
+    merged = [[value, count] for value, count in counts if value < limit]
+    merged.append([limit, sum(count for value, count in counts if value >= limit)])
+    return merged
+
+
+def load_aisle_complements():
+    """[[aisle_id, complementary_aisle_id, probability], ...] (see above)."""
+    total_orders = sum(count for _, count in load_counts("basket_sizes.csv", "item_count"))
+    aisle_orders = dict(load_counts("aisle_orders.csv", "aisle_id"))
+    pairs = {}
+    with open(os.path.join(DATAS_DIR, "aisle_pairs.csv"), encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            a, b, count = int(row["aisle_id"]), int(row["other_aisle_id"]), int(row["order_count"])
+            pairs[a, b] = pairs[b, a] = count
+    complements = []
+    for a in sorted(aisle_orders):
+        candidates = []
+        for b in aisle_orders:
+            both = pairs.get((a, b), 0)
+            if b == a or both < COMPLEMENT_MIN_ORDERS:
+                continue
+            p_b_given_a, p_b = both / aisle_orders[a], aisle_orders[b] / total_orders
+            excess = p_b_given_a - p_b
+            if p_b_given_a / p_b >= COMPLEMENT_MIN_LIFT and excess >= COMPLEMENT_MIN_EXCESS:
+                candidates.append((excess, b))
+        for excess, b in sorted(candidates, reverse=True)[:COMPLEMENT_MAX]:
+            complements.append([a, b, round(min(excess, COMPLEMENT_MAX_PROBABILITY), 3)])
+    return complements
 
 
 def main():
@@ -696,7 +749,7 @@ def main():
     for product in products:
         product["unit"] = unit_for(product)
         product["base_price"] = base_price_for(product)
-        product["order_count"] = popularity.get(product["id"], 0)
+        product["order_count"], product["reorder_count"] = popularity.get(product["id"], (0, 0))
         product["size"] = size_for(product)
         product["season"] = season_mask(product["name"][SOURCE_LANG], product["aisle_id"])
 
@@ -732,7 +785,7 @@ def main():
     # names.
     products_compact = [
         [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"],
-         p["size"], p["season"], p["name"][SOURCE_LANG]]
+         p["size"], p["season"], p["reorder_count"], p["name"][SOURCE_LANG]]
         for p in products
     ]
     # Tax class of each aisle: food (reduced rate) or standard.
@@ -791,7 +844,8 @@ def main():
         assert aisle_id in aisles, f"AISLE_SIZES: unknown aisle {aisle_id}"
         for unit in sizes:
             assert unit in aisle_units[aisle_id], f"AISLE_SIZES: aisle {aisle_id} has no unit {unit}"
-    for aisle_id, complement, probability in AISLE_COMPLEMENTS:
+    aisle_complements = load_aisle_complements()
+    for aisle_id, complement, probability in aisle_complements:
         assert str(aisle_id) in aisles and str(complement) in aisles and 0 < probability <= 1
     for country, hours in COUNTRY_OPENING_HOURS.items():
         assert 0 <= hours[0] < hours[1] <= 24, country
@@ -810,7 +864,7 @@ def main():
             "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
             "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
-                               "size", "season", f"name_{SOURCE_LANG}"],
+                               "size", "season", "reorder_count", f"name_{SOURCE_LANG}"],
             "name_files": {lang: f"names_{lang}.json" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
@@ -834,7 +888,13 @@ def main():
         "country_opening_hours": COUNTRY_OPENING_HOURS,
         "country_vat": COUNTRY_VAT,
         "aisle_tax_class": aisle_tax_class,
-        "aisle_complements": AISLE_COMPLEMENTS,
+        "aisle_complements": aisle_complements,
+        # Instacart distributions: items per order (sizes over 60 merged
+        # into 60), customers per median days between orders (capped at 30
+        # by Instacart), customers per re-order share (in %).
+        "basket_sizes": merge_tail(load_counts("basket_sizes.csv", "item_count"), 60),
+        "customer_intervals": load_counts("customer_intervals.csv", "median_days", "customer_count"),
+        "customer_reorder_rates": load_counts("customer_reorder_rates.csv", "reorder_pct", "customer_count"),
         "store_name_templates": STORE_NAME_TEMPLATES,
         "promotion_labels": PROMOTION_LABELS,
         "products": products_compact,

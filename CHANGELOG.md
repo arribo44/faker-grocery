@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Coherent baskets, customers and basket sizes are now measured on the Instacart data** instead of hand-made rules:
+  - **Complementary products**: 263 aisle pairings (instead of 25 hand-made ones) with their probabilities, from the co-purchases of ~3.2M baskets: aisles bought together at least twice as often as by chance and at least 3 points more often (pasta -> pasta sauce 21%, burger buns -> sausages 19%, granola -> yogurt 28%...), at most 3 per aisle.
+  - **Basket sizes**: without both `min_items` and `max_items`, the item count follows the distribution of Instacart basket sizes (~10 items on average, many small baskets, a few very big ones), scaled by `family_size` (x0.8 for one person, x1 for a couple, +20% per extra person); a single bound clamps it. With both bounds, the count stays uniform between them.
+  - **Customers**: `customer_profile()` draws the shopping interval from the distribution of ~206,000 customers' median days between orders, the re-order rate from their share of re-ordered items (~45% on average), and favorites in proportion to how often products are re-ordered.
+- `scripts/build_order_stats.py` also writes `DATAS/basket_sizes.csv`, `aisle_orders.csv`, `aisle_pairs.csv`, `customer_intervals.csv`, `customer_reorder_rates.csv`, and a `reorder_count` column in `product_popularity.csv`; `grocery_data.json` products rows gained `reorder_count` (before `name_en`), new tables `basket_sizes`, `customer_intervals`, `customer_reorder_rates`. **Breaking for direct data access.**
+- Default basket sizes changed: the same seed yields different baskets than 0.10.0.
+- README: the raw Instacart files are no longer downloadable anonymously from Kaggle; the Hugging Face mirror used instead reproduces the versioned statistics exactly.
+
 ---
 
 ## [0.10.0] - 2026-11-14
