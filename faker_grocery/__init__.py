@@ -17,6 +17,7 @@ localization.
 Supported languages: en, fr, it, es, pt, de.
 """
 import datetime as _datetime
+import gzip
 import itertools
 import json
 import math
@@ -30,7 +31,7 @@ from faker.providers import BaseProvider
 __version__ = "0.10.0"
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-_DATA_PATH = os.path.join(_DATA_DIR, "grocery_data.json")
+_DATA_PATH = os.path.join(_DATA_DIR, "grocery_data.json.gz")
 _data_cache: dict[str, Any] | None = None
 _data_lock = threading.Lock()
 _language_lock = threading.Lock()
@@ -177,14 +178,14 @@ def _load_data() -> dict[str, Any]:
         # names another thread already added to the first).
         with _data_lock:
             if _data_cache is None:
-                with open(_DATA_PATH, encoding="utf-8") as f:
+                with gzip.open(_DATA_PATH, "rt", encoding="utf-8") as f:
                     raw = json.load(f)
                 _data_cache = _build_index(raw)
     return _data_cache
 
 
 def _ensure_language(lang: str) -> None:
-    """Load the product names of `lang` (names_<lang>.json, a list parallel
+    """Load the product names of `lang` (names_<lang>.json.gz, a list parallel
     to the products) on first use, appending them as a new column to every
     product row. Languages nobody asks for are never loaded."""
     data = _load_data()
@@ -193,11 +194,11 @@ def _ensure_language(lang: str) -> None:
     with _language_lock:
         if lang in data["name_col"]:
             return
-        with open(os.path.join(_DATA_DIR, data["meta"]["name_files"][lang]), encoding="utf-8") as f:
+        with gzip.open(os.path.join(_DATA_DIR, data["meta"]["name_files"][lang]), "rt", encoding="utf-8") as f:
             names = json.load(f)
         products = data["products"]
         if len(names) != len(products):
-            raise RuntimeError(f"names_{lang}.json has {len(names)} names for {len(products)} products")
+            raise RuntimeError(f"names_{lang}.json.gz has {len(names)} names for {len(products)} products")
         column = len(products[0]) if products else 0
         for row, name in zip(products, names, strict=True):
             row.append(name)

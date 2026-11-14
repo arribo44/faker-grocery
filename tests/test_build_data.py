@@ -2,6 +2,7 @@
 Tests for the catalog build helpers (scripts/build_data.py) and for the
 translated product names they produce.
 """
+import gzip
 import json
 import os
 import sys
@@ -105,7 +106,7 @@ class TestLanguageFiles(unittest.TestCase):
         data = provider._data
         for lang in self.LANGS:
             path = os.path.join(ROOT, "faker_grocery", "data", data["meta"]["name_files"][lang])
-            with open(path, encoding="utf-8") as f:
+            with gzip.open(path, "rt", encoding="utf-8") as f:
                 names = json.load(f)
             self.assertEqual(len(names), len(data["products"]), msg=lang)
             self.assertTrue(all(name.strip() for name in names), msg=lang)

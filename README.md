@@ -21,7 +21,7 @@ The catalog is built from the [Instacart Market Basket Analysis](https://www.kag
 
 Unit labels are translated in every language ("bouteille", "bottiglia",
 "botella", "garrafa", "Flasche"). Only the product names of the language(s)
-you actually use are loaded (one `names_<lang>.json` file per language).
+you actually use are loaded (one `names_<lang>.json.gz` file per language).
 
 Translated product names come from two sources:
 
@@ -429,11 +429,29 @@ Prices are typed `float`; they are ints for currencies without minor units
 
 ---
 
-## 🎯 Demo
+## 🎯 Command line: demo and bulk export
+
+The package installs a `faker-grocery` command (also `python -m faker_grocery`):
 
 ```bash
-python -m faker_grocery
+faker-grocery                                    # demo, en_US and fr_FR
+faker-grocery demo --locale de_DE                # demo for one locale
+
+# Bulk export: baskets, receipts, customers (with their shopping history) or products
+faker-grocery export baskets -n 10000 --locale fr_FR --format csv -o baskets.csv
+faker-grocery export receipts -n 500 --format jsonl --seed 42 > receipts.jsonl
+faker-grocery export customers -n 200 --trips 12 --format json -o customers.json
+faker-grocery export products -n 5000 --locale it_IT --format csv -o products.csv
 ```
+
+- **Formats**: `csv` has one row per basket item (`baskets`, `customers`),
+  per receipt line (`receipts`) or per product, with the basket / receipt /
+  customer fields repeated on each row - ready for a spreadsheet, pandas or
+  a database import. `jsonl` (one record per line) and `json` keep the
+  nested structure. Dates are ISO 8601.
+- `--seed` makes the output reproducible; `--locale` sets the language,
+  currency, VAT, shopping hours and seasons; without `-o` the output goes
+  to standard output.
 
 For a complete demo with more examples per feature and both locales, see [`examples/basic_usage.py`](examples/basic_usage.py).
 
@@ -441,12 +459,12 @@ For a complete demo with more examples per feature and both locales, see [`examp
 
 ## 🧱 Data layout
 
-A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole catalog:
+A single gzip-compressed JSON file, `faker_grocery/data/grocery_data.json.gz`, holds the whole catalog:
 
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
 - `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, reorder_count, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none)
-- translated product names live in separate files, `faker_grocery/data/names_<lang>.json` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
+- translated product names live in separate files, `faker_grocery/data/names_<lang>.json.gz` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
 - `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
 - `currencies`: `{code: {symbol, rate, price_level, decimals}}` - fixed approximate EUR -> currency rates and grocery price levels
 - `country_currencies`: `{country_code: currency_code}` - default currency per locale country (unlisted countries use EUR)
@@ -469,7 +487,7 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 > The store tables (sizes, seasons, VAT, opening hours, store names,
 > promotions) are hand-made, in `scripts/store_tables.py`.
 
-> `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only `grocery_data.json` is (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
+> `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only the `faker_grocery/data/*.json.gz` files are (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json.gz` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
 
 > The statistics files (`order_times.csv`, `product_popularity.csv`,
 > `basket_sizes.csv`, `aisle_orders.csv`, `aisle_pairs.csv`,
@@ -488,7 +506,7 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 The files are generated by [`scripts/build_data.py`](scripts/build_data.py) from the raw CSVs in `DATAS/` (`aisles.csv`, `departments.csv`, `products.csv`) plus the translation files in `scripts/translations/`. To add a language (e.g. `nl`):
 
 1. Create `scripts/translations/departments_nl.json` and `aisles_nl.json` (21 and 134 hand-translated entries).
-2. Create `scripts/translations/word_dict_nl.json` and `phrases_nl.json`, with the same keys as `word_dict_fr.json` / `phrases_fr.json` (a ~860-word grocery vocabulary and ~90 multi-word expressions translated as a whole).
+2. Create `scripts/translations/word_dict_nl.json` and `phrases_nl.json`, with the same keys as `word_dict_fr.json` / `phrases_fr.json` (a ~1,200-word grocery vocabulary and ~90 multi-word expressions translated as a whole).
 3. Optionally, create `scripts/translations/product_names_nl.json` (`{product_id: name}`) with natural translations of the most ordered products - they take precedence over the automatic translation. See `product_names_fr.json`.
 4. Add `"nl"` to `TRANSLATED_LANGUAGES`, and a `"nl"` label to every entry of `UNIT_LABELS`, in `scripts/build_data.py`. If the language puts the noun first (like French, Italian, Spanish, Portuguese), also add it to `NOUN_FIRST_LANGUAGES` so word order is reversed.
 5. Re-run:

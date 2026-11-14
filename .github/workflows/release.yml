@@ -33,7 +33,7 @@ jobs:
       - run: python -m build
       - run: twine check dist/*
       - name: Check the wheel ships the catalog
-        run: unzip -l dist/*.whl | grep -q "faker_grocery/data/grocery_data.json"
+        run: unzip -l dist/*.whl | grep -q "faker_grocery/data/grocery_data.json.gz"
       - uses: actions/upload-artifact@v7
         with:
           name: dist

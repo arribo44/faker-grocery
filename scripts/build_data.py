@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build faker_grocery/data/grocery_data.json from the raw CSV dataset in DATAS/
+Build faker_grocery/data/grocery_data.json.gz (and names_<lang>.json.gz) from the raw CSV dataset in DATAS/
 (aisles.csv, departments.csv, products.csv - Instacart Market Basket Analysis
 open dataset) plus the hand-curated translation files in scripts/translations/.
 
@@ -9,6 +9,7 @@ add scripts/translations/word_dict_<lang>.json (+ departments_<lang>.json and
 aisles_<lang>.json) and add <lang> to LANGUAGES below.
 """
 import csv
+import gzip
 import json
 import os
 import random
@@ -35,7 +36,7 @@ from store_tables import (
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATAS_DIR = os.path.join(ROOT, "DATAS")
 TRANSLATIONS_DIR = os.path.join(ROOT, "scripts", "translations")
-OUTPUT_PATH = os.path.join(ROOT, "faker_grocery", "data", "grocery_data.json")
+OUTPUT_PATH = os.path.join(ROOT, "faker_grocery", "data", "grocery_data.json.gz")
 
 # Source language of the raw dataset.
 SOURCE_LANG = "en"
@@ -53,6 +54,15 @@ PLANNED_LANGUAGES = []
 NOUN_FIRST_LANGUAGES = {"fr", "it", "es", "pt"}
 
 TOKEN_RE = re.compile(r"[A-Za-z']+|[^A-Za-z']+")
+
+
+def write_json_gz(path, obj):
+    """Write `obj` as compact, gzip-compressed JSON (~3x smaller package).
+    mtime=0 and no file name in the header keep the output byte-identical
+    across rebuilds of the same data."""
+    payload = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    with open(path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as f:
+        f.write(payload)
 
 
 def load_json(path):
@@ -899,7 +909,7 @@ def main():
             "product_count": len(products_compact),
             "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
                                "size", "season", "reorder_count", f"name_{SOURCE_LANG}"],
-            "name_files": {lang: f"names_{lang}.json" for lang in TRANSLATED_LANGUAGES},
+            "name_files": {lang: f"names_{lang}.json.gz" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
         "aisles": aisles,
@@ -935,18 +945,14 @@ def main():
     }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        # Compact separators: indentation would roughly double the file size
-        # for no benefit (nobody reads a 50k-row JSON by hand).
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    write_json_gz(OUTPUT_PATH, data)
 
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"Wrote {OUTPUT_PATH} ({size_mb:.2f} MB, {len(products_compact)} products)")
 
     for lang in TRANSLATED_LANGUAGES:
         names_path = os.path.join(os.path.dirname(OUTPUT_PATH), data["meta"]["name_files"][lang])
-        with open(names_path, "w", encoding="utf-8") as f:
-            json.dump([p["name"][lang] for p in products], f, ensure_ascii=False, separators=(",", ":"))
+        write_json_gz(names_path, [p["name"][lang] for p in products])
         print(f"Wrote {names_path} ({os.path.getsize(names_path) / (1024 * 1024):.2f} MB)")
 
 
