@@ -1,6 +1,6 @@
 # Faker Grocery Store Provider
 
-**A custom [Faker](https://faker.readthedocs.io/) provider for generating realistic fake data for supermarkets and hypermarkets: departments, aisles, products, prices and randomized shopping lists.**
+**A custom [Faker](https://faker.readthedocs.io/) provider for generating realistic fake data for supermarkets and hypermarkets: departments, aisles, products (with package sizes and EAN-13 barcodes), prices, seasonal and coherent shopping lists, recurring customers and till receipts with VAT and promotions.**
 
 The catalog is built from the [Instacart Market Basket Analysis](https://www.kaggle.com/c/instacart-market-basket-analysis) open dataset: **21 departments**, **134 aisles** and **~49,700 real products**.
 
@@ -88,12 +88,14 @@ Unknown ids/names and invalid arguments (e.g. `min_items > max_items`,
 ```python
 fake.grocery_department()               # "produits laitiers et œufs"
 fake.department_id()                    # 16
+fake.grocery_department(weighted=False) # uniform pick (default: popular departments more often)
 fake.grocery_department_name(16)        # "produits laitiers et œufs"
 
 fake.aisle()                            # "yaourt"
 fake.aisle(department="produits laitiers et œufs")   # restricted to that department
 fake.aisle(department=16)               # same, by id
 fake.aisle_id(department=16)            # 120
+fake.aisle(weighted=False)              # uniform pick (default: popular aisles more often)
 fake.aisle_name(120)                    # "yaourt"
 ```
 
@@ -136,10 +138,30 @@ fake.product_record()
 #     'currency': 'EUR',
 #     'unit': 'pot',                # the product's own, fixed unit
 #     'price_per': 'pot',           # what the prices are for: one article, or one kg/L
+#     'ean': '2000000123455',       # stable, valid EAN-13 (in-store prefix 20)
+#     'size': '500 g',              # package size: '6 x 330 mL', '12 pièce(s)', or None
+#     'reference_price': 4.08,      # price per kg or L ("prix au kilo"), None if unknown
+#     'reference_unit': 'kg',
 # }
+
+fake.product_ean(12345)                 # "2000000123455", always the same for this product
+fake.product(aisle=24, month=6)         # seasonal pick: strawberries in June, clementines in December
 
 fake.product_name(12345)                # look up a specific product id
 ```
+
+**Package sizes** come from the product name when it states one ("12 oz" ->
+340 g, "16 fl oz" -> 475 mL, "6 ct" -> 6 pieces), otherwise from sizes
+typical of the aisle and unit (a jar of spices 30-80 g, a pack of beer 6 to
+24 x 330 mL, a box of eggs 6 to 12...). The dearer a product is within its
+price range, the bigger its package, so prices per kg stay plausible.
+Products sold by weight or volume have no size (the quantity bought is).
+
+**Seasonality**: with a `month` (1-12), or in a `grocery_list()` with a date,
+fresh fruits and vegetables in season come up about twice as often and
+out-of-season ones less (strawberries, asparagus, clementines, squash...),
+with seasons shifted by six months in the southern hemisphere (AU, NZ, AR,
+CL, ZA, BR...).
 
 Products are picked **in proportion to their popularity**: how many times
 each one was ordered in the ~32M order lines of the Instacart data. Bananas,
@@ -150,6 +172,8 @@ in a real basket. Pass `weighted=False` to `product()`, `product_record()`,
 ### 💰 Prices, quantities, units
 
 Every product has a stable catalog **`base_price`** (its "probable price"),
+organic and premium products ("Organic", "Premium", "Artisan", "Grass-Fed"...)
+costing 25% more than their plain equivalent,
 generated once from its department's typical range (or a finer per-aisle
 and per-unit range where one is needed: a can of beer is not priced like a
 bottle of spirits) - or, for products sold
@@ -167,7 +191,7 @@ product is always sold the same way.
 
 ```python
 fake.price()                            # 4.77  (random department's typical range)
-fake.price(department=16)               # price within the dairy/eggs range
+fake.price(department=16)               # price within the dairy/eggs range (skewed towards cheap, like the catalog)
 fake.price(min_price=10.0, max_price=20.0)   # both bounds are required
 fake.price(product=12345)               # that product's base_price, jittered +/-5%
 
@@ -228,8 +252,10 @@ fake.grocery_item()
 # {
 #     'product': 'Yaourt Grec Vanille',
 #     'product_id': 12345,
+#     'ean': '2000000123455',
 #     'aisle': 'yaourt',
 #     'department': 'produits laitiers et œufs',
+#     'size': '4 x 125 g',
 #     'quantity': 3,
 #     'unit': 'pot',                # the product's own unit (always the same for it)
 #     'unit_price': 2.15,           # base_price jittered +/-5%
@@ -261,11 +287,17 @@ shopping_list = fake.grocery_list()
 fake.grocery_list(family_size=5)                       # bigger default basket
 fake.grocery_list(min_items=3, max_items=8)             # override the item-count range explicitly
 fake.grocery_list(department="fruits et légumes")       # restrict the whole list to one department
+fake.grocery_list(coherent=False)                       # no complementary products (see below)
+
+# Baskets are coherent by default: an item sometimes brings a complementary
+# one (pasta -> pasta sauce, cereal -> milk, chips -> dip, beer -> chips,
+# pancake mix -> syrup...), within the item count. These pairings are
+# hand-made: the Instacart co-purchase data isn't in this repository.
 
 # Optionally attach a plausible shopping date/time (within the last year,
-# during store opening hours, by default 8:00-20:00). Days and hours follow
-# the locale's weekly shopping pattern (see below; weighted=False for a
-# uniform pick):
+# during the country's store opening hours, see grocery_opening_hours()).
+# Days and hours follow the locale's weekly shopping pattern (see below;
+# weighted=False for a uniform pick), and fresh produce follows the season:
 shopping_list = fake.grocery_list(with_datetime=True)
 shopping_list["shopping_datetime"]      # datetime.datetime(2026, 3, 12, 17, 42, 8)
 
@@ -274,11 +306,64 @@ import datetime
 fake.grocery_list(date=datetime.date(2025, 12, 24))
 
 # Standalone helper used internally by grocery_list():
-fake.shopping_datetime()                                # random date (last year) + time (8h-20h)
+fake.grocery_opening_hours()                            # (8, 21) in France, (7, 23) in the US, (8, 20) by default
+fake.shopping_datetime()                                # random date (last year) + time within those hours
 fake.shopping_datetime(date=datetime.date(2025, 12, 24))
 fake.shopping_datetime(open_hour=9, close_hour=19)
 fake.shopping_datetime(weighted=False)                  # uniform day and hour
 ```
+
+### 👤 Recurring customers
+
+```python
+customer = fake.customer_profile()      # or customer_profile(family_size=4)
+# {'customer_id': 106053, 'name': 'Théophile Gosselin', 'family_size': 3,
+#  'favorite_product_ids': [10246, 49044, ...],   # 8 + 4 per person, popular products
+#  'shopping_interval_days': 7,                    # 3 to 30, weekly most often
+#  'reorder_rate': 0.54}                           # share of items re-ordered from favorites
+
+history = fake.customer_history(customer, trips=12)    # 12 baskets, oldest first
+history = fake.customer_history(trips=12, end_date=datetime.date(2026, 6, 30))
+# Each basket is a grocery_list() dict with 'shopping_datetime' and
+# 'customer_id'; trips are spaced by the shopping interval (give or take a
+# third) and each item is a re-order of a favorite with probability reorder_rate.
+```
+
+The orders of magnitude (weekly shopping most common, ~60% re-orders) are
+Instacart's, but hand-coded: the per-customer Instacart data isn't in this
+repository.
+
+### 🧾 Receipts
+
+```python
+receipt = fake.receipt()                     # for a new grocery_list(with_datetime=True)
+receipt = fake.receipt(basket)               # for a given basket (grocery_list / customer_history)
+receipt = fake.receipt(promotion_rate=0.3, payment_method="cash")
+# {
+#     'store': {'store_id': 5830, 'name': 'Épicerie Joubert', 'address': '42, avenue Renaud, ...'},
+#     'receipt_number': '5830-14-783226', 'register': 14,
+#     'datetime': datetime.datetime(2026, 8, 21, 9, 25, 30),
+#     'lines': [{'product': ..., 'ean': ..., 'quantity': 3, 'unit_price': 4.29, 'total_price': 12.87,
+#                'promotion': '2 achetés + 1 offert', 'discount': 4.29, 'vat_rate': 0.055}, ...],
+#     'item_count': 9, 'subtotal': 86.62, 'discount_total': 5.95,
+#     'taxes': [{'rate': 0.055, 'base': 76.46, 'amount': 4.21}], 'tax_total': 4.21,
+#     'taxes_included': True, 'total': 80.67,
+#     'payment_method': 'cash', 'amount_tendered': 100.0, 'change': 19.33, 'currency': 'EUR',
+# }
+
+fake.grocery_store()                         # a fictional store: id, localized name, address
+```
+
+- **Promotions**: each line has a `promotion_rate` chance (default 15%) of
+  a percentage off (10-50%), 3-for-2 or 2nd at half price (counted items
+  bought in sufficient numbers), with localized labels.
+- **VAT**: approximate rates of ~27 countries, a reduced rate for food and
+  the standard rate for alcohol, household, personal care, pet and baby
+  care products (France 5.5% / 20%, Germany 7% / 19%...). Prices include
+  it, except in the US and Canada where a sales tax is added at the till
+  (groceries mostly exempt). Other countries get no tax breakdown.
+- **Payment**: card, cash or mobile; paying cash hands over the next
+  banknote or round amount, and gets change.
 
 #### 🕒 Shopping patterns
 
@@ -306,8 +391,9 @@ day-of-week encoding is undocumented and read as 0 = Sunday.
 ### 🔤 Type hints
 
 The package is fully typed (it ships a `py.typed` marker), and the dicts it
-returns are described by `TypedDict`s: `ProductRecord`, `GroceryItem` and
-`GroceryList`. Editors then autocomplete their keys, and mypy/pyright flag
+returns are described by `TypedDict`s: `ProductRecord`, `GroceryItem`,
+`GroceryList`, `CustomerProfile`, `GroceryStore`, `Receipt`, `ReceiptLine`
+and `TaxLine`. Editors then autocomplete their keys, and mypy/pyright flag
 typos and type errors:
 
 ```text
@@ -352,7 +438,7 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
-- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units)
+- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none)
 - translated product names live in separate files, `faker_grocery/data/names_<lang>.json` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
 - `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
 - `currencies`: `{code: {symbol, rate, price_level, decimals}}` - fixed approximate EUR -> currency rates and grocery price levels
@@ -364,7 +450,16 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 - `measured_units`: `{unit_key: {min, base, per_person, step, price_per, factor}}` - quantity ranges and pricing basis of units sold by weight/volume
 - `measured_price_ranges`: `{aisle_id: [min, max]}` - EUR per kg/L for aisles with measured units
 - `shopping_patterns`: `{name: [weekday][hour] weights}` (weekday 0 = Monday) and `country_shopping_patterns`: `{country_code: name}` - realistic shopping days/hours
+- `aisle_unit_price_ranges`: `{aisle_id: {unit_key: [min, max]}}` - finer per-article EUR ranges (beer, fruit, vegetables, eggs)
+- `premium_surcharge`, `seasonal_factors`, `southern_hemisphere_countries` - organic/premium price factor and seasonality settings
+- `default_opening_hours`, `country_opening_hours`: `{country_code: [open, close]}`
+- `country_vat`: `{country_code: [food_rate, standard_rate, included]}` and `aisle_tax_class`: `{aisle_id: "food"|"standard"}`
+- `aisle_complements`: `[[aisle_id, complementary_aisle_id, probability], ...]` - coherent baskets
+- `store_name_templates`, `promotion_labels`: `{language: ...}` - receipts
 - `meta`: supported/default languages, name files, base currency, source, field layout
+
+> The store tables (sizes, seasons, VAT, opening hours, complements, store
+> names, promotions) are hand-made, in `scripts/store_tables.py`.
 
 > `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only `grocery_data.json` is (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
 

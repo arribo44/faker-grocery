@@ -14,6 +14,25 @@ import os
 import random
 import re
 
+from store_tables import (
+    AISLE_COMPLEMENTS,
+    AISLE_SIZES,
+    COUNTRY_OPENING_HOURS,
+    COUNTRY_VAT,
+    DEFAULT_OPENING_HOURS,
+    PREMIUM_RE,
+    PREMIUM_SURCHARGE,
+    PROMOTION_LABELS,
+    SEASONAL_FACTORS,
+    SOUTHERN_HEMISPHERE_COUNTRIES,
+    STANDARD_RATE_AISLES,
+    STANDARD_RATE_DEPARTMENTS,
+    STORE_NAME_TEMPLATES,
+    UNIT_DEFAULT_SIZES,
+    parse_size,
+    season_mask,
+)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATAS_DIR = os.path.join(ROOT, "DATAS")
 TRANSLATIONS_DIR = os.path.join(ROOT, "scripts", "translations")
@@ -591,9 +610,34 @@ def price_range_for(aisle_id, department_id, unit):
 
 
 def base_price_for(product):
-    """A product's stable price, from its range (see price_range_for)."""
+    """A product's stable price, from its range (see price_range_for), with
+    PREMIUM_SURCHARGE for organic / premium products."""
     low, high = price_range_for(product["aisle_id"], product["department_id"], product["unit"])
-    return triangular_price(product["id"], low, high)
+    price = triangular_price(product["id"], low, high)
+    if PREMIUM_RE.search(product["name"][SOURCE_LANG]):
+        price = round(price * PREMIUM_SURCHARGE, 2)
+    return price
+
+
+def size_for(product):
+    """The product's package size ([count, amount, unit], see store_tables),
+    or None: the size stated in its name if any, else one of its (aisle,
+    unit)'s sizes - the larger the dearer the product is within its price
+    range, so price and size stay consistent. Products sold by weight or
+    volume have no size (the quantity bought is the size)."""
+    unit = product["unit"]
+    if unit in MEASURED_UNITS:
+        return None
+    stated = parse_size(product["name"][SOURCE_LANG], product["aisle_id"], product["department_id"])
+    if stated is not None:
+        return stated
+    aisle_sizes = AISLE_SIZES.get(str(product["aisle_id"]), {})
+    options = aisle_sizes[unit] if unit in aisle_sizes else UNIT_DEFAULT_SIZES.get(unit)
+    if not options:
+        return None
+    low, high = price_range_for(product["aisle_id"], product["department_id"], unit)
+    quantile = (triangular_price(product["id"], low, high) - low) / (high - low)
+    return options[min(len(options) - 1, int(quantile * len(options)))]
 
 
 def clean_name(name):
@@ -653,6 +697,8 @@ def main():
         product["unit"] = unit_for(product)
         product["base_price"] = base_price_for(product)
         product["order_count"] = popularity.get(product["id"], 0)
+        product["size"] = size_for(product)
+        product["season"] = season_mask(product["name"][SOURCE_LANG], product["aisle_id"])
 
     for lang in TRANSLATED_LANGUAGES:
         word_dict = load_json(os.path.join(TRANSLATIONS_DIR, f"word_dict_{lang}.json"))
@@ -686,9 +732,16 @@ def main():
     # names.
     products_compact = [
         [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"],
-         p["name"][SOURCE_LANG]]
+         p["size"], p["season"], p["name"][SOURCE_LANG]]
         for p in products
     ]
+    # Tax class of each aisle: food (reduced rate) or standard.
+    aisle_tax_class = {
+        aisle_id: "standard"
+        if info["department_id"] in STANDARD_RATE_DEPARTMENTS or int(aisle_id) in STANDARD_RATE_AISLES
+        else "food"
+        for aisle_id, info in aisles.items()
+    }
 
     price_ranges = PRICE_RANGES
     unit_labels = UNIT_LABELS
@@ -734,6 +787,17 @@ def main():
     shopping_patterns = {DEFAULT_SHOPPING_PATTERN: load_order_time_weights(), **SYNTHETIC_SHOPPING_PATTERNS}
     unknown = set(COUNTRY_SHOPPING_PATTERNS.values()) - set(shopping_patterns)
     assert not unknown, f"COUNTRY_SHOPPING_PATTERNS references unknown patterns: {unknown}"
+    for aisle_id, sizes in AISLE_SIZES.items():
+        assert aisle_id in aisles, f"AISLE_SIZES: unknown aisle {aisle_id}"
+        for unit in sizes:
+            assert unit in aisle_units[aisle_id], f"AISLE_SIZES: aisle {aisle_id} has no unit {unit}"
+    for aisle_id, complement, probability in AISLE_COMPLEMENTS:
+        assert str(aisle_id) in aisles and str(complement) in aisles and 0 < probability <= 1
+    for country, hours in COUNTRY_OPENING_HOURS.items():
+        assert 0 <= hours[0] < hours[1] <= 24, country
+    for lang in languages:
+        assert lang in STORE_NAME_TEMPLATES, lang
+        assert all(lang in labels for labels in PROMOTION_LABELS.values()), lang
 
     data = {
         "meta": {
@@ -746,7 +810,7 @@ def main():
             "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
             "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
-                               f"name_{SOURCE_LANG}"],
+                               "size", "season", f"name_{SOURCE_LANG}"],
             "name_files": {lang: f"names_{lang}.json" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
@@ -763,6 +827,16 @@ def main():
         "aisle_unit_price_ranges": AISLE_UNIT_PRICE_RANGES,
         "shopping_patterns": shopping_patterns,
         "country_shopping_patterns": COUNTRY_SHOPPING_PATTERNS,
+        "premium_surcharge": PREMIUM_SURCHARGE,
+        "seasonal_factors": SEASONAL_FACTORS,
+        "southern_hemisphere_countries": SOUTHERN_HEMISPHERE_COUNTRIES,
+        "default_opening_hours": DEFAULT_OPENING_HOURS,
+        "country_opening_hours": COUNTRY_OPENING_HOURS,
+        "country_vat": COUNTRY_VAT,
+        "aisle_tax_class": aisle_tax_class,
+        "aisle_complements": AISLE_COMPLEMENTS,
+        "store_name_templates": STORE_NAME_TEMPLATES,
+        "promotion_labels": PROMOTION_LABELS,
         "products": products_compact,
     }
 

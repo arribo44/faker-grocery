@@ -11,7 +11,17 @@ from typing import assert_type
 
 from faker import Faker
 
-from faker_grocery import GroceryItem, GroceryList, GroceryStoreProvider, ProductRecord
+from faker_grocery import (
+    CustomerProfile,
+    GroceryItem,
+    GroceryList,
+    GroceryStore,
+    GroceryStoreProvider,
+    ProductRecord,
+    Receipt,
+    ReceiptLine,
+    TaxLine,
+)
 
 
 def make_faker() -> Faker:
@@ -34,7 +44,17 @@ class TestTypedDictsMatchRuntime(unittest.TestCase):
     def test_grocery_list_keys(self) -> None:
         self.assertEqual(set(self.fake.grocery_list()), GroceryList.__required_keys__)
         self.assertEqual(set(self.fake.grocery_list(with_datetime=True)) - GroceryList.__required_keys__,
-                         GroceryList.__optional_keys__)
+                         {"shopping_datetime"})
+        history = self.fake.customer_history(trips=1)
+        self.assertEqual(set(history[0]) - GroceryList.__required_keys__, GroceryList.__optional_keys__)
+
+    def test_new_typed_dicts_keys(self) -> None:
+        self.assertEqual(set(self.fake.customer_profile()), set(CustomerProfile.__annotations__))
+        self.assertEqual(set(self.fake.grocery_store()), set(GroceryStore.__annotations__))
+        receipt = self.fake.receipt()
+        self.assertEqual(set(receipt), Receipt.__required_keys__)
+        self.assertEqual(set(receipt["lines"][0]), set(ReceiptLine.__annotations__))
+        self.assertEqual(set(receipt["taxes"][0]), set(TaxLine.__annotations__))
 
 
 class TestDocumentedTypedUsage(unittest.TestCase):
@@ -57,6 +77,9 @@ class TestDocumentedTypedUsage(unittest.TestCase):
         assert_type(grocery.shopping_datetime(), datetime.datetime)
         assert_type(grocery.grocery_department(), str)
         assert_type(grocery.department_id(), int)
+        assert_type(grocery.receipt(basket), Receipt)
+        assert_type(grocery.customer_profile(), CustomerProfile)
+        assert_type(grocery.customer_history(trips=2), list[GroceryList])
 
 
 if __name__ == "__main__":

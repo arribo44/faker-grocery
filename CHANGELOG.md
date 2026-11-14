@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Till receipts**: `receipt(basket=None, promotion_rate=0.15, payment_method=None)` returns a fictional store (`grocery_store()`: id, localized name, address), receipt number, register, date/time, lines with promotions, VAT breakdown, total, payment method (card / cash / mobile), amount tendered and change. New `Receipt`, `ReceiptLine`, `TaxLine` and `GroceryStore` `TypedDict`s.
+  - **VAT** with approximate rates for ~27 countries (`country_vat`): reduced rate for food, standard rate for alcohol, household, personal care, pet and baby care aisles; included in prices, except the US and Canada where a sales tax is added at the till. Other countries: no tax breakdown.
+  - **Promotions** with localized labels: percentage off (10-50%), 3-for-2, 2nd at half price.
+- **Recurring customers**: `customer_profile(family_size=None)` (favorite products, shopping interval, re-order rate) and `customer_history(customer=None, trips=10, end_date=None)`, a series of dated baskets re-ordering the customer's favorites. New `CustomerProfile` `TypedDict`; `GroceryList` gained an optional `customer_id`. Hand-coded orders of magnitude (weekly shopping, ~60% re-orders): the per-customer Instacart data isn't in the repository.
+- **EAN-13 barcodes**: every product has a stable, valid EAN-13 with the in-store prefix 20 (so it can't clash with a real product); `ean` field in `product_record()` / `grocery_item()`, new `product_ean(product_id)`.
+- **Package sizes and price per kg/L**: `product_record()` gained `size` ("500 g", "6 x 330 mL", "12 pièce(s)" or None), `reference_price` and `reference_unit` (the "prix au kilo"); `grocery_item()` gained `size`. Sizes come from the product name when it states one ("12 oz" -> 340 g), else from per-aisle/unit tables (`scripts/store_tables.py`), bigger for dearer products within their price range.
+- **Seasonality**: `product()`, `product_record()` and `grocery_item()` take a `month`; `grocery_list()` with a date follows its month. Fresh produce in season comes up about twice as often, out of season less (25 fruits and vegetables), shifted by six months in the southern hemisphere.
+- **Coherent baskets**: `grocery_list(coherent=True)` (default) sometimes adds a complementary product (pasta -> pasta sauce, cereal -> milk, chips -> dip... 25 hand-made pairings), within the item count.
+- **Country opening hours**: `grocery_opening_hours()` ((8, 21) in France, (7, 23) in the US, (8, 20) by default); `shopping_datetime()` and dated baskets use them when no hours are given.
+- 31 new tests (158 -> 189), in `tests/test_store_features.py`.
+
+### Changed
+- **Departments and aisles are popularity-weighted**: `grocery_department()`, `department_id()`, `aisle()` and `aisle_id()` pick in proportion to how much was ordered from them (produce and dairy far more often than bulk); `weighted=False` restores a uniform pick.
+- **Organic and premium products cost 25% more** ("Organic", "Premium", "Artisan", "Grass-Fed"... in the name), so their base price may exceed their range's upper bound.
+- `price()` without a product draws from the department range skewed towards cheap prices, like catalog prices, instead of uniformly.
+- `shopping_datetime()`'s `open_hour` / `close_hour` default to the country's opening hours instead of 8-20.
+- `grocery_list()` with a date now draws the date before the items (so they follow its season): the same seed yields different baskets than 0.9.0.
+- `grocery_data.json`: products rows gained `size` and `season` columns (before `name_en`); new tables `premium_surcharge`, `seasonal_factors`, `southern_hemisphere_countries`, `default_opening_hours`, `country_opening_hours`, `country_vat`, `aisle_tax_class`, `aisle_complements`, `store_name_templates`, `promotion_labels`. **Breaking for direct data access.**
+
 ---
 
 ## [0.9.0] - 2026-11-14

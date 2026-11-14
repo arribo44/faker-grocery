@@ -362,8 +362,10 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for row in self.provider._data["products"]:
             low, high = self.eur_price_range(row)
             base_price = row[base_price_col]
+            # Organic / premium products get a surcharge on top of their range.
+            surcharge = self.provider._data["premium_surcharge"]
             self.assertGreaterEqual(base_price, low, msg=row)
-            self.assertLessEqual(base_price, high, msg=row)
+            self.assertLessEqual(base_price, round(high * surcharge, 2), msg=row)
 
     def test_every_product_unit_is_one_of_its_aisle_units(self):
         data = self.provider._data
@@ -825,12 +827,13 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for _ in range(50):
             dt = fake.shopping_datetime(date=sunday)
             self.assertEqual(dt.date(), sunday)
-            self.assertTrue(8 <= dt.hour < 20)
+            self.assertTrue(8 <= dt.hour < 20)  # de_DE opening hours
 
     def test_weighted_shopping_hours_avoid_quiet_opening_time(self):
         # Instacart orders are much rarer at 8h than mid-afternoon.
         self.fake.set_grocery_shopping_pattern("instacart_us")
-        hours = [self.fake.shopping_datetime(date=datetime.date(2025, 6, 1)).hour for _ in range(2000)]
+        hours = [self.fake.shopping_datetime(date=datetime.date(2025, 6, 1), open_hour=8, close_hour=20).hour
+                 for _ in range(2000)]
         self.assertGreater(hours.count(14), hours.count(8))
         for hour in hours:
             self.assertGreaterEqual(hour, 8)
@@ -932,7 +935,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
                 basket = fake.grocery_list(family_size=1 + seed % 6, with_datetime=True)
                 self.assertEqual(basket["total"], round(sum(i["total_price"] for i in basket["items"]), decimals))
                 dt = basket["shopping_datetime"]
-                self.assertTrue(8 <= dt.hour < 20)
+                open_hour, close_hour = fake.grocery_opening_hours()
+                self.assertTrue(open_hour <= dt.hour < close_hour, msg=(locale, dt))
                 self.assertGreater(pattern[dt.weekday()][dt.hour], 0, msg=(locale, dt))
                 for item in basket["items"]:
                     row = data["by_id"][item["product_id"]]
@@ -997,8 +1001,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
         data = self.provider._data
         unit_col, price_col = data["unit_col"], data["base_price_col"]
         for row in data["by_aisle"][27]:
-            limit = 18.0 if row[unit_col] == "pack" else 4.0
-            self.assertLessEqual(row[price_col], limit, msg=row)
+            limit = (18.0 if row[unit_col] == "pack" else 4.0) * data["premium_surcharge"]
+            self.assertLessEqual(row[price_col], round(limit, 2), msg=row)
 
     def test_top_products_have_plausible_units(self):
         data = self.provider._data

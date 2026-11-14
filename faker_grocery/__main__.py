@@ -73,6 +73,18 @@ def demo(locale: str) -> None:
     shopping_list = fake.grocery_list(family_size=4)
     print(f"  Item count: {shopping_list['item_count']}  Total: {shopping_list['total']} {shopping_list['currency']}")
 
+    print("\n--- Receipt ---")
+    receipt = provider.receipt(promotion_rate=0.3)
+    print(f"  {receipt['store']['name']} - {receipt['store']['address']}")
+    print(f"  No {receipt['receipt_number']}  {receipt['datetime']:%Y-%m-%d %H:%M}")
+    for line in receipt["lines"]:
+        promotion = f"  [{line['promotion']} -{line['discount']}]" if line["promotion"] else ""
+        print(f"  {line['quantity']} {line['unit']} x {line['product']}: {line['total_price']}{promotion}")
+    for tax in receipt["taxes"]:
+        print(f"  VAT {tax['rate']:.1%}: {tax['amount']} on {tax['base']}")
+    print(f"  Total: {receipt['total']} {receipt['currency']} ({receipt['payment_method']}, "
+          f"tendered {receipt['amount_tendered']}, change {receipt['change']})")
+
 
 def main() -> None:
     for locale in ["en_US", "fr_FR"]:
