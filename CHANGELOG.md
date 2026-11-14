@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `shopping_datetime()` raised `ValueError: Total of weights must be greater than zero` for opening hours no shopping pattern covers (e.g. `open_hour=22, close_hour=24` or `0, 6` in `fr_FR` / `de_DE`); the day is now picked uniformly in that case.
+- `grocery_list(max_items=2)` (only `max_items`, below the default minimum) raised `ValueError`; the default `min_items` now adapts to the given `max_items`.
+- Aisles 32 ("packaged produce") and 123 ("packaged vegetables fruits") had the same name in fr, it, es, pt and de, so looking aisle 123 up by name always returned aisle 32. Aisle 32 is now "produits frais emballés" / "prodotti freschi confezionati" / "productos frescos envasados" / "produtos frescos embalados" / "Abgepackte Frischware". The build now fails if two aisles or departments share a name.
+- `unit(aisle=..., department=...)` silently ignored the department when the aisle belongs to another one; it now raises `ValueError`, like `product()`.
+- `quantity(max_quantity)` with a value below 1 (or not an integer) raised an obscure `randrange` error; it now raises `ValueError`.
+- `price(min_price=..., max_price=...)` accepted negative bounds and returned negative prices; a negative `min_price` now raises `ValueError`.
+- Numeric ids with surrounding spaces (`" 16 "`) are accepted; non-ASCII digits are rejected.
+- The catalog's first load is now thread-safe (two threads creating their first provider at once could lose the product names of a language).
+- Stale docstrings (supported languages, `language`, `grocery_item` unit).
+
+### Changed
+- **Beer is priced per container**: cans 0.80-3, bottles 1-4, packs 4-18 EUR instead of the alcohol department's 4-40 EUR (a can of beer used to cost ~19 EUR). Per-article ranges by (aisle, unit) also for fresh fruits (piece 0.20-2, tray 1.50-6), fresh vegetables (piece 0.30-3, bunch 0.80-3) and eggs (1.50-6). New `aisle_unit_price_ranges` table in `grocery_data.json`.
+- **Plausible units for the most ordered products** (`PRODUCT_UNIT_OVERRIDES` in `scripts/build_data.py`): strawberries and berries by the tray, onions and carrots by the kg, garlic by the piece, kale and cilantro by the bunch... and products whose name states a pack or container ("12 Pack Soda", "Milk Gallon") are no longer sold by the litre or gram. `aisle_units` includes these forced units.
+- Product names are cleaned of repeated/trailing spaces (412 English names, e.g. "TAI PEI      14OZ.SWEET & SOUR CHKN").
+- Base prices and units changed for the affected products: the same seed yields different values than 0.8.0.
+- 11 new tests (142 -> 153).
+
 ---
 
 ## [0.8.0] - 2026-10-31

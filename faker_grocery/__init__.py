@@ -7,13 +7,13 @@ single grocery items and full randomized shopping lists.
 
 The catalog data comes from the Instacart Market Basket Analysis open
 dataset (21 departments, 134 aisles, ~49,700 real products). Department and
-aisle names are available in multiple languages; product names are
-translated from English via a curated word-substitution dictionary, so
-translated names are approximate rather than grammatically perfect - this is
-fake/test data, not a professional localization.
+aisle names are hand-translated; product names are translated from English
+(hand-checked for the 2,000 most ordered products in French, automatic
+word-substitution otherwise), so most translated names are approximate rather
+than grammatically perfect - this is fake/test data, not a professional
+localization.
 
-Supported languages: en, fr.
-Planned (data not yet built): it, es, pt, de.
+Supported languages: en, fr, it, es, pt, de.
 """
 import datetime as _datetime
 import itertools
@@ -30,6 +30,7 @@ __version__ = "0.8.0"
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _DATA_PATH = os.path.join(_DATA_DIR, "grocery_data.json")
 _data_cache: dict[str, Any] | None = None
+_data_lock = threading.Lock()
 _language_lock = threading.Lock()
 
 # An id (int or numeric string) or a localized name, as accepted by the
@@ -91,9 +92,14 @@ class GroceryList(TypedDict):
 def _load_data() -> dict[str, Any]:
     global _data_cache
     if _data_cache is None:
-        with open(_DATA_PATH, encoding="utf-8") as f:
-            raw = json.load(f)
-        _data_cache = _build_index(raw)
+        # Locked so two threads creating their first provider at the same
+        # time share one cache (a second one would silently drop the product
+        # names another thread already added to the first).
+        with _data_lock:
+            if _data_cache is None:
+                with open(_DATA_PATH, encoding="utf-8") as f:
+                    raw = json.load(f)
+                _data_cache = _build_index(raw)
     return _data_cache
 
 
@@ -162,6 +168,7 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
         "department_units": raw["department_units"],
         "measured_units": raw["measured_units"],
         "measured_price_ranges": raw["measured_price_ranges"],
+        "aisle_unit_price_ranges": raw["aisle_unit_price_ranges"],
         "shopping_patterns": raw["shopping_patterns"],
         "country_shopping_patterns": raw["country_shopping_patterns"],
         "products": products,
@@ -198,7 +205,7 @@ def _is_id(value: object) -> bool:
     though `bool` is a subclass of `int`)."""
     if isinstance(value, bool):
         return False
-    return isinstance(value, int) or (isinstance(value, str) and value.isdigit())
+    return isinstance(value, int) or (isinstance(value, str) and value.strip().isascii() and value.strip().isdigit())
 
 
 class GroceryStoreProvider(BaseProvider):
@@ -234,7 +241,8 @@ class GroceryStoreProvider(BaseProvider):
 
     @property
     def language(self) -> str:
-        """The catalog language actually used ('en' or 'fr'), resolved from the locale."""
+        """The catalog language actually used ('en', 'fr', 'it', 'es', 'pt' or 'de'),
+        resolved from the locale ('en' for unsupported languages)."""
         return self._lang
 
     @property
@@ -542,8 +550,11 @@ class GroceryStoreProvider(BaseProvider):
             return self._jitter_price(self._convert_price(row[self._data["base_price_col"]]))
         if (min_price is None) != (max_price is None):
             raise ValueError("min_price and max_price must be given together")
-        if min_price is not None and max_price is not None and min_price > max_price:
-            raise ValueError(f"min_price ({min_price}) is greater than max_price ({max_price})")
+        if min_price is not None and max_price is not None:
+            if min_price < 0:
+                raise ValueError(f"min_price must not be negative, got {min_price!r}")
+            if min_price > max_price:
+                raise ValueError(f"min_price ({min_price}) is greater than max_price ({max_price})")
         if min_price is None:
             dept_id = self._resolve_department_id(department)
             if dept_id is None:
@@ -553,6 +564,8 @@ class GroceryStoreProvider(BaseProvider):
 
     def quantity(self, max_quantity: int = 10) -> int:
         """Return a random quantity for a shopping list item (1 to `max_quantity`)."""
+        if isinstance(max_quantity, bool) or not isinstance(max_quantity, int) or max_quantity < 1:
+            raise ValueError(f"max_quantity must be a positive integer, got {max_quantity!r}")
         return self.random_int(min=1, max=max_quantity)
 
     def unit(self, department: IdOrName | None = None, aisle: IdOrName | None = None) -> str:
@@ -562,11 +575,14 @@ class GroceryStoreProvider(BaseProvider):
         is picked among the ones plausible for it (e.g. 'L'/'bottle' for the
         milk aisle, 'jar' for spices), instead of any unit at all. Generated
         products themselves always come with their own fixed unit (see
-        `product_record`)."""
+        `product_record`). If both are given, the aisle must belong to the
+        department."""
         aisle_id = self._resolve_aisle_id(aisle)
-        if aisle_id is not None:
-            return self._unit_label(self.random_element(self._data["aisle_units"][str(aisle_id)]))
         dept_id = self._resolve_department_id(department)
+        if aisle_id is not None:
+            if dept_id is not None and self.aisles[str(aisle_id)]["department_id"] != dept_id:
+                raise ValueError(f"Aisle {aisle!r} does not belong to department {department!r}")
+            return self._unit_label(self.random_element(self._data["aisle_units"][str(aisle_id)]))
         if dept_id is not None:
             return self._unit_label(self.random_element(self._data["department_units"][str(dept_id)]))
         return self._unit_label(self.random_element(list(self._data["unit_labels"].keys())))
@@ -607,10 +623,9 @@ class GroceryStoreProvider(BaseProvider):
         weighted: bool = True,
     ) -> GroceryItem:
         """Return a single random grocery list line item as a dict, with a
-        unit price jittered +/-5% around the product's base price and a unit
-        of measure plausible for the product's department (see `unit`).
+        unit price jittered +/-5% around the product's base price.
 
-        The unit is the product's own (fixed) unit. Items sold by weight or
+        The unit is the product's own (fixed) unit (see `product_record`). Items sold by weight or
         volume (kg, g, L) get a realistic measured quantity (e.g. 0.85 kg,
         350 g) and are priced per kg or per L ('price_per'); other items are
         counted (1, 2, 3... articles) and priced per article.
@@ -694,7 +709,11 @@ class GroceryStoreProvider(BaseProvider):
             if weighted:
                 today = _datetime.date.today()
                 days = [today - _datetime.timedelta(days=n) for n in range(366)]
-                day = rng.choices(days, weights=[sum(hour_weights[d.weekday()]) for d in days])[0]
+                day_weights = [sum(hour_weights[d.weekday()]) for d in days]
+                # Opening hours the pattern never sees anyone shopping in
+                # (e.g. 22-24 in a European pattern): no day is likelier than
+                # another, pick uniformly rather than fail.
+                day = rng.choices(days, weights=day_weights)[0] if sum(day_weights) else rng.choice(days)
             else:
                 day = self.generator.date_between(start_date="-1y", end_date="today")
         elif isinstance(date, _datetime.datetime):
@@ -724,7 +743,9 @@ class GroceryStoreProvider(BaseProvider):
 
         - `family_size` (default 2, a couple) scales the default item-count
           range and how much of each item is bought, when `min_items` /
-          `max_items` are not given explicitly.
+          `max_items` are not given explicitly. A default bound is adjusted
+          to the other bound if that one is given (`max_items=2` alone gives
+          baskets of up to 2 items, not an error).
         - `department` optionally restricts every item to one department
           (id or localized name).
         - `with_datetime=True` (or passing `date`) adds a 'shopping_datetime'
@@ -736,6 +757,8 @@ class GroceryStoreProvider(BaseProvider):
         _check_family_size(family_size)
         if min_items is None:
             min_items = max(3, 4 + 3 * (family_size - 1))
+            if max_items is not None:
+                min_items = min(min_items, max(max_items, 0))
         if max_items is None:
             max_items = max(min_items + 3, 10 + 5 * (family_size - 1))
         if min_items < 0 or min_items > max_items:

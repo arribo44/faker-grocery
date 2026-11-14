@@ -352,6 +352,50 @@ MEASURED_PRICE_RANGES = {
 }
 
 
+# Per-article price range (min, max) in EUR for some (aisle, unit) pairs,
+# overriding the department's PRICE_RANGES where one range per department is
+# too coarse: a can of beer is not priced like a bottle of spirits, nor a
+# lime like a bunch of asparagus.
+AISLE_UNIT_PRICE_RANGES = {
+    "24": {"piece": [0.2, 2.0], "tray": [1.5, 6.0]},  # fresh fruits
+    "27": {"can": [0.8, 3.0], "bottle": [1.0, 4.0], "pack": [4.0, 18.0]},  # beers coolers
+    "83": {"piece": [0.3, 3.0], "bunch": [0.8, 3.0]},  # fresh vegetables
+    "86": {"box": [1.5, 6.0]},  # eggs
+}
+
+# Fixed unit for some of the most ordered products, whose unit drawn among
+# their aisle's would be implausible ("Organic Yellow Onion" by the bunch,
+# "Strawberries" by the piece). These products come up in most baskets, so
+# their oddities would too. Units not already in the aisle's AISLE_UNITS are
+# added to its plausible units in the generated data.
+PRODUCT_UNIT_OVERRIDES = {
+    13176: "bag",  # Bag of Organic Bananas
+    21137: "tray",  # Organic Strawberries
+    16797: "tray",  # Strawberries
+    26604: "tray",  # Organic Blackberries
+    27966: "tray",  # Organic Raspberries
+    39275: "tray",  # Organic Blueberries
+    43352: "tray",  # Raspberries
+    37646: "kg",  # Organic Gala Apples
+    22935: "kg",  # Organic Yellow Onion
+    8518: "kg",  # Organic Red Onion
+    17794: "kg",  # Carrots
+    24964: "piece",  # Organic Garlic
+    28985: "bunch",  # Michigan Organic Kale
+    31717: "bunch",  # Organic Cilantro
+    49235: "bottle",  # Organic Half & Half
+    35951: "bottle",  # Organic Unsweetened Almond Milk
+    # Names stating a count, pack or container size, not sold by weight/volume.
+    31808: "pack",  # Lemon-Lime 12 Pack Soda
+    10510: "pack",  # Black Cherry Soda 6 Ct
+    35543: "pack",  # Sparkling Cranberry 6 Pack
+    48496: "pack",  # All Natural Kiwi Strawberry - 6 CT
+    31408: "pack",  # Fruit Pnc 12 Floz 12 Pk 144 Floz
+    21866: "bottle",  # 2% Milk Gallon
+    3355: "piece",  # Goldfish 9ct Wg Cheddar
+    17042: "piece",  # 8 oz Dofino Havarti Light
+}
+
 # Quantities for units sold by weight or volume, instead of by the piece.
 # Items in these units are priced per `price_per` unit (per kg or per L,
 # `factor` converting a quantity to it: 350 g -> 0.35 kg) and get a
@@ -475,19 +519,33 @@ def triangular_price(seed, low, high):
 
 def unit_for(product):
     """The product's fixed unit, among its aisle's plausible units. Seeded on
-    a string (not the bare id) so it is independent of the price draw."""
+    a string (not the bare id) so it is independent of the price draw.
+    PRODUCT_UNIT_OVERRIDES wins over the draw."""
+    if product["id"] in PRODUCT_UNIT_OVERRIDES:
+        return PRODUCT_UNIT_OVERRIDES[product["id"]]
     return random.Random(f"unit:{product['id']}").choice(AISLE_UNITS[str(product["aisle_id"])])
 
 
+def price_range_for(aisle_id, department_id, unit):
+    """The EUR range a product's base_price is drawn from: per kg/L from the
+    aisle's MEASURED_PRICE_RANGES for measured units, else per article from
+    AISLE_UNIT_PRICE_RANGES if the (aisle, unit) pair has one, else from the
+    department's PRICE_RANGES."""
+    if unit in MEASURED_UNITS:
+        return MEASURED_PRICE_RANGES[str(aisle_id)]
+    specific = AISLE_UNIT_PRICE_RANGES.get(str(aisle_id), {}).get(unit)
+    return specific or PRICE_RANGES[str(department_id)]
+
+
 def base_price_for(product):
-    """Per-kg/L price (from the aisle's MEASURED_PRICE_RANGES) for products
-    sold by weight/volume, per-article price (from the department's
-    PRICE_RANGES) otherwise."""
-    if product["unit"] in MEASURED_UNITS:
-        low, high = MEASURED_PRICE_RANGES[str(product["aisle_id"])]
-    else:
-        low, high = PRICE_RANGES[str(product["department_id"])]
+    """A product's stable price, from its range (see price_range_for)."""
+    low, high = price_range_for(product["aisle_id"], product["department_id"], product["unit"])
     return triangular_price(product["id"], low, high)
+
+
+def clean_name(name):
+    """Collapse runs of whitespace ("TAI PEI      14OZ.SWEET") and trim."""
+    return " ".join(name.split())
 
 
 def load_order_time_weights():
@@ -528,7 +586,7 @@ def main():
                     "id": int(row["product_id"]),
                     "aisle_id": int(row["aisle_id"]),
                     "department_id": int(row["department_id"]),
-                    "name": {"en": row["product_name"]},
+                    "name": {"en": clean_name(row["product_name"])},
                 }
             )
 
@@ -561,9 +619,9 @@ def main():
         phrases = load_json(phrases_path) if os.path.exists(phrases_path) else {}
         for product in products:
             curated = curated_names.get(str(product["id"]))
-            product["name"][lang] = curated or fallback_translation(
+            product["name"][lang] = clean_name(curated or fallback_translation(
                 product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES
-            )
+            ))
 
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
 
@@ -581,15 +639,36 @@ def main():
 
     price_ranges = PRICE_RANGES
     unit_labels = UNIT_LABELS
+    # An aisle's plausible units: AISLE_UNITS plus any unit forced on one of
+    # its products by PRODUCT_UNIT_OVERRIDES (appended, so the seeded unit
+    # draw of the other products is unchanged).
+    aisle_units = {aisle_id: list(units) for aisle_id, units in AISLE_UNITS.items()}
+    by_id = {p["id"]: p for p in products}
+    for product_id, unit in PRODUCT_UNIT_OVERRIDES.items():
+        assert product_id in by_id, f"PRODUCT_UNIT_OVERRIDES: unknown product {product_id}"
+        units = aisle_units[str(by_id[product_id]["aisle_id"])]
+        if unit not in units:
+            units.append(unit)
     # A department's plausible units are those of its aisles.
     department_units = {}
     for aisle_id in sorted(aisles, key=int):
         dept_units = department_units.setdefault(str(aisles[aisle_id]["department_id"]), [])
-        dept_units.extend(u for u in AISLE_UNITS[aisle_id] if u not in dept_units)
+        dept_units.extend(u for u in aisle_units[aisle_id] if u not in dept_units)
 
     assert set(AISLE_UNITS) == set(aisles), "AISLE_UNITS / aisles ids mismatch"
     assert set(department_units) == set(price_ranges), "department_units / price_ranges department ids mismatch"
-    for aisle_id, keys in AISLE_UNITS.items():
+    for aisle_id, ranges in AISLE_UNIT_PRICE_RANGES.items():
+        for unit, (low, high) in ranges.items():
+            assert unit in aisle_units[aisle_id] and unit not in MEASURED_UNITS and 0 < low < high, (aisle_id, unit)
+    # Names must identify one aisle / department: name lookups search every
+    # language, so a name shared by two ids would always resolve to the first.
+    for kind, table in (("aisle", aisles), ("department", departments)):
+        owners = {}
+        for item_id, names in table.items():
+            for lang in [SOURCE_LANG] + TRANSLATED_LANGUAGES:
+                owner = owners.setdefault(names[lang].lower(), item_id)
+                assert owner == item_id, f"{kind}s {owner} and {item_id} share the name {names[lang]!r}"
+    for aisle_id, keys in aisle_units.items():
         unknown = set(keys) - set(unit_labels)
         assert not unknown, f"aisle {aisle_id} references unknown unit keys: {unknown}"
         if set(keys) & set(MEASURED_UNITS):
@@ -624,10 +703,11 @@ def main():
         "country_currencies": COUNTRY_CURRENCIES,
         "country_price_levels": COUNTRY_PRICE_LEVELS,
         "unit_labels": unit_labels,
-        "aisle_units": AISLE_UNITS,
+        "aisle_units": aisle_units,
         "department_units": department_units,
         "measured_units": MEASURED_UNITS,
         "measured_price_ranges": MEASURED_PRICE_RANGES,
+        "aisle_unit_price_ranges": AISLE_UNIT_PRICE_RANGES,
         "shopping_patterns": shopping_patterns,
         "country_shopping_patterns": COUNTRY_SHOPPING_PATTERNS,
         "products": products_compact,

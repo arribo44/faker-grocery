@@ -150,7 +150,9 @@ in a real basket. Pass `weighted=False` to `product()`, `product_record()`,
 ### 💰 Prices, quantities, units
 
 Every product has a stable catalog **`base_price`** (its "probable price"),
-generated once from its department's typical range - or, for products sold
+generated once from its department's typical range (or a finer per-aisle
+and per-unit range where one is needed: a can of beer is not priced like a
+bottle of spirits) - or, for products sold
 by weight or volume, as a **price per kg or per L** from its aisle's own
 range (fresh fruit 1.50-8 EUR/kg, seafood counter 12-45 EUR/kg, milk
 0.90-2.50 EUR/L...). Any time you actually price a product — via

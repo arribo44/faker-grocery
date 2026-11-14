@@ -348,11 +348,14 @@ class TestGroceryStoreProvider(unittest.TestCase):
 
     def eur_price_range(self, row):
         """The EUR range a product's base_price comes from: its aisle's per-kg/L
-        range if sold by weight/volume, else its department's per-article range."""
+        range if sold by weight/volume, else its (aisle, unit) per-article
+        range if any, else its department's per-article range."""
         data = self.provider._data
-        if row[data["unit_col"]] in data["measured_units"]:
+        unit = row[data["unit_col"]]
+        if unit in data["measured_units"]:
             return self.provider._data["measured_price_ranges"][str(row[1])]
-        return data["price_ranges"][str(row[2])]
+        specific = data["aisle_unit_price_ranges"].get(str(row[1]), {}).get(unit)
+        return specific or data["price_ranges"][str(row[2])]
 
     def test_every_product_base_price_is_within_its_price_range(self):
         base_price_col = self.provider._data["base_price_col"]
@@ -912,6 +915,75 @@ class TestGroceryStoreProvider(unittest.TestCase):
                     self.assertGreater(item["unit_price"], 0)
                     self.assertEqual(item["total_price"], round(billed * item["unit_price"], decimals))
 
+
+    # -- regressions found by the 2026-11 audit ----------------------------------
+
+    def test_shopping_datetime_hours_no_pattern_covers(self):
+        # 22-24 / 0-6 have zero weight in the European patterns: the day
+        # draw used to raise "Total of weights must be greater than zero".
+        for locale in ("fr_FR", "de_DE"):
+            fake = Faker(locale)
+            fake.add_provider(GroceryStoreProvider)
+            for open_hour, close_hour in [(22, 24), (0, 6)]:
+                dt = fake.shopping_datetime(open_hour=open_hour, close_hour=close_hour)
+                self.assertTrue(open_hour <= dt.hour < close_hour, msg=(locale, dt))
+
+    def test_grocery_list_max_items_alone_below_default_min(self):
+        for max_items in (0, 1, 2):
+            basket = self.fake.grocery_list(max_items=max_items, family_size=4)
+            self.assertLessEqual(basket["item_count"], max_items)
+
+    def test_aisle_and_department_names_are_unambiguous(self):
+        data = self.provider._data
+        for table in (self.provider.aisles, self.provider.departments):
+            owners = {}
+            for item_id, names in table.items():
+                for lang in data["languages"]:
+                    owner = owners.setdefault(names[lang].lower(), item_id)
+                    self.assertEqual(owner, item_id, msg=names[lang])
+
+    def test_packaged_produce_aisles_resolve_by_name(self):
+        self.assertEqual(self.fake.product_record(aisle="fruits et légumes emballés")["aisle_id"], 123)
+        self.assertEqual(self.fake.product_record(aisle="produits frais emballés")["aisle_id"], 32)
+
+    def test_unit_with_mismatched_aisle_and_department_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.unit(aisle=104, department=4)  # spices aisle, produce department
+        self.assertIn(self.fake.unit(aisle=104, department=13), ["pot"])
+
+    def test_quantity_invalid_max_raises(self):
+        for max_quantity in (0, -1, 2.5, True):
+            with self.assertRaises(ValueError):
+                self.fake.quantity(max_quantity)
+
+    def test_negative_custom_price_range_raises(self):
+        with self.assertRaises(ValueError):
+            self.fake.price(min_price=-5, max_price=-1)
+
+    def test_ids_with_surrounding_spaces_are_accepted(self):
+        self.assertEqual(self.fake.grocery_department_name(" 16 "), self.fake.grocery_department_name(16))
+
+    def test_beer_is_priced_per_container(self):
+        data = self.provider._data
+        unit_col, price_col = data["unit_col"], data["base_price_col"]
+        for row in data["by_aisle"][27]:
+            limit = 18.0 if row[unit_col] == "pack" else 4.0
+            self.assertLessEqual(row[price_col], limit, msg=row)
+
+    def test_top_products_have_plausible_units(self):
+        data = self.provider._data
+        expected = {16797: "tray", 21137: "tray", 22935: "kg", 24964: "piece", 21866: "bottle", 31808: "pack"}
+        for product_id, unit in expected.items():
+            self.assertEqual(data["by_id"][product_id][data["unit_col"]], unit, msg=product_id)
+
+    def test_product_names_have_no_stray_whitespace(self):
+        for lang in self.provider._data["languages"]:
+            fake = self._faker({"en": "en_US", "fr": "fr_FR", "it": "it_IT", "es": "es_ES",
+                                "pt": "pt_PT", "de": "de_DE"}[lang])
+            provider = next(p for p in fake.providers if isinstance(p, GroceryStoreProvider))
+            col = provider._data["name_col"][lang]
+            for row in provider._data["products"]:
+                self.assertEqual(row[col], " ".join(row[col].split()), msg=(lang, row[0]))
 
 if __name__ == "__main__":
     unittest.main()
