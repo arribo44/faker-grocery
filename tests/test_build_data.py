@@ -15,8 +15,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 from build_data import (  # noqa: E402
+    FUNCTION_WORDS,
     TRANSLATIONS_DIR,
     fallback_translation,
+    lowercase_function_words,
     load_json,
     protect_phrases,
     reorder_words,
@@ -34,6 +36,27 @@ class TestTranslationHelpers(unittest.TestCase):
     def test_reorder_never_moves_unknown_words(self):
         # "Jennie" is a brand (not in the dictionary): the segment stays as is.
         self.assertEqual(reorder_words("Organic Jennie Beef", WORD_DICT), "Organic Jennie Beef")
+
+    def test_reorder_does_not_cross_linking_words(self):
+        words = {**WORD_DICT, "diced": "en dés", "tomatoes": "tomates", "italian": "italiennes", "herbs": "herbes",
+                 "with": "avec"}
+        self.assertEqual(reorder_words("Diced Tomatoes with Italian Herbs", words),
+                         "Tomatoes Diced with Herbs Italian")
+
+    def test_function_words_are_lower_case_inside_names(self):
+        self.assertEqual(lowercase_function_words("Rigatoni Avec Sauce Et Crème", FUNCTION_WORDS["fr"]),
+                         "Rigatoni avec Sauce et Crème")
+        self.assertEqual(lowercase_function_words("Avec Sauce", FUNCTION_WORDS["fr"]), "Avec Sauce")  # first word
+        self.assertEqual(lowercase_function_words("Brot Mit Käse", FUNCTION_WORDS["de"]), "Brot mit Käse")
+        words = {**WORD_DICT, "with": "avec", "sauce": "sauce"}
+        self.assertEqual(fallback_translation("Beef With Sauce", words, {}, function_words=FUNCTION_WORDS["fr"]),
+                         "Bœuf avec Sauce")
+
+    def test_dictionaries_share_their_words(self):
+        keys = [set(load_json(os.path.join(TRANSLATIONS_DIR, f"word_dict_{lang}.json")))
+                for lang in ("fr", "it", "es", "pt", "de")]
+        self.assertTrue(all(k == keys[0] for k in keys))
+        self.assertGreater(len(keys[0]), 1150)
 
     def test_reorder_works_per_punctuation_segment(self):
         self.assertEqual(reorder_words("Balsamic Vinegar, Jennie O", WORD_DICT), "Vinegar Balsamic, Jennie O")

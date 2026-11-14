@@ -62,7 +62,9 @@ def load_json(path):
 
 # Punctuation that splits a product name into independently reorderable
 # segments ("Napkins, Dinner, Ultra White" -> 3 segments).
-SEGMENT_SPLIT_RE = re.compile(r"(\s*[,;/&()\-]\s*)")
+# Linking words also split segments, so the halves of "Diced Tomatoes with
+# Italian Herbs" are reordered separately instead of swapping places.
+SEGMENT_SPLIT_RE = re.compile(r"(\s*[,;/&()\-]\s*|\s+(?:with|and|or|in|for|of)\s+)", re.IGNORECASE)
 
 
 def protect_phrases(name, phrases):
@@ -84,15 +86,46 @@ def protect_phrases(name, phrases):
     return name, entries
 
 
-def fallback_translation(name, word_dict, phrases, reorder=True):
+# Function words written in lower case inside a name, as on real shelf
+# labels ("Rigatoni avec sauce", not "Rigatoni Avec Sauce"), even though the
+# English name capitalizes every word.
+FUNCTION_WORDS = {
+    "fr": {"avec", "de", "du", "des", "d'", "et", "ou", "sans", "au", "aux", "à", "en", "pour", "la", "le",
+           "les", "sur", "par"},
+    "it": {"con", "di", "da", "del", "della", "e", "o", "senza", "al", "alla", "allo", "ai", "in", "per", "il",
+           "la", "le", "su"},
+    "es": {"con", "de", "del", "y", "o", "sin", "al", "a", "en", "para", "el", "la", "los", "las", "por"},
+    "pt": {"com", "de", "do", "da", "dos", "das", "e", "ou", "sem", "ao", "à", "em", "para", "o", "a", "os",
+           "as", "por"},
+    "de": {"mit", "und", "oder", "ohne", "aus", "von", "vom", "zum", "zur", "für", "in", "im", "auf", "nach"},
+}
+
+
+def fallback_translation(name, word_dict, phrases, reorder=True, function_words=frozenset()):
     """Translation for products without a hand-checked one: known
     expressions first, then word-order reversal (for noun-first languages),
-    then word substitution."""
+    then word substitution, with `function_words` in lower case except at
+    the start of the name."""
     name, entries = protect_phrases(name, phrases)
     words = {**word_dict, **entries}
     if reorder:
         name = reorder_words(name, words)
-    return translate_name(name, words)
+    return lowercase_function_words(translate_name(name, words), function_words)
+
+
+def lowercase_function_words(name, function_words):
+    """'Rigatoni Avec Sauce' -> 'Rigatoni avec Sauce' (not the first word)."""
+    if not function_words:
+        return name
+    parts = re.split(r"(\s+)", name)
+    seen_word = False
+    for index, part in enumerate(parts):
+        if not part or part.isspace():
+            continue
+        if seen_word and part.lower() in function_words and not part.isupper():
+            parts[index] = part.lower()
+        seen_word = True
+    return "".join(parts)
 
 
 def reorder_words(name, word_dict):
@@ -772,7 +805,8 @@ def main():
         for product in products:
             curated = curated_names.get(str(product["id"]))
             product["name"][lang] = clean_name(curated or fallback_translation(
-                product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES
+                product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES,
+                function_words=FUNCTION_WORDS.get(lang, frozenset()),
             ))
 
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
