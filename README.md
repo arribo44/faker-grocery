@@ -12,10 +12,10 @@ The catalog is built from the [Instacart Market Basket Analysis](https://www.kag
 |----------|------------------|-----------------------|----------------|
 | `en` | `en_US` | Original English names | Original English names |
 | `fr` | `fr_FR`, `fr_CA`, `fr_BE`... | Hand-translated | Natural translation for the 2,000 most ordered products (~2/3 of generated products); approximate automatic translation for the rest |
-| `it` | `it_IT` | Hand-translated | Approximate automatic translation |
-| `es` | `es_ES`, `es_MX`... | Hand-translated | Approximate automatic translation |
-| `pt` | `pt_PT`, `pt_BR` | Hand-translated (European Portuguese) | Approximate automatic translation |
-| `de` | `de_DE`, `de_AT`, `de_CH` | Hand-translated | Approximate automatic translation (word order kept, see below) |
+| `it` | `it_IT` | Hand-translated | Same as French |
+| `es` | `es_ES`, `es_MX`... | Hand-translated | Same as French |
+| `pt` | `pt_PT`, `pt_BR` | Hand-translated (European Portuguese) | Same as French (European Portuguese) |
+| `de` | `de_DE`, `de_AT`, `de_CH` | Hand-translated | Same as French (automatic part keeps the English word order, see below) |
 
 > **Default language**: `en` (used for any locale not listed above, e.g. as a fallback).
 
@@ -23,27 +23,28 @@ Unit labels are translated in every language ("bouteille", "bottiglia",
 "botella", "garrafa", "Flasche"). Only the product names of the language(s)
 you actually use are loaded (one `names_<lang>.json` file per language).
 
-French product names come from two sources:
+Translated product names come from two sources:
 
-- **The 2,000 most ordered products** have a natural, checked translation
-  (`scripts/translations/product_names_fr.json`): French shelf-label style,
-  brands kept as is - "Organic Raspberries" -> "Framboises bio", "White
-  Balsamic Vinegar" -> "Vinaigre balsamique blanc". Since products are picked
-  by popularity, they make up about **two thirds** of generated products.
+- **The 2,000 most ordered products** have a natural, checked translation in
+  every language (`scripts/translations/product_names_<lang>.json`), in
+  shelf-label style, brands kept as is: "Organic Raspberries" -> "Framboises
+  bio", "Lamponi bio", "Frambuesas ecológicas", "Framboesas biológicas",
+  "Bio-Himbeeren". Since products are picked by popularity, they make up
+  about **two thirds** of generated products.
 - **All other products** are translated automatically: common expressions
-  first ("gluten free" -> "sans gluten", `phrases_fr.json`), then the word
-  order of fully known segments is reversed (French puts the noun first),
-  then word-by-word substitution with a ~860-word grocery dictionary
-  (`word_dict_fr.json`). Brand names stay untranslated. This is approximate,
-  "faker-grade" output ("Hot-dogs Bœuf Bio"), fine for tests and demos but
-  not a professional localization.
+  first ("gluten free" -> "sans gluten", `phrases_<lang>.json`), then the
+  word order of fully known segments is reversed for the Romance languages
+  (they put the noun first; segments are split at punctuation and linking
+  words such as "with" or "and"), then word-by-word substitution with a
+  ~1,200-word grocery dictionary (`word_dict_<lang>.json`), with function
+  words in lower case inside the name ("Rigatoni avec Sauce"). Brand names
+  stay untranslated. This is approximate, "faker-grade" output ("Tomates en
+  dés Bio avec Herbes Italien"), fine for tests and demos but not a
+  professional localization. German keeps the English word order, since it
+  also puts the noun last ("Glutenfrei Schokoladenstückchen Kekse").
 
-Italian, Spanish, Portuguese and German product names use that same
-automatic translation (with their own `word_dict_<lang>.json` and
-`phrases_<lang>.json`): "Biscotti Gocce di cioccolato Senza glutine",
-"Galletas Pepitas de chocolate Sin gluten". German keeps the English word
-order, since it also puts the noun last ("Glutenfrei Schokoladenstückchen
-Kekse"). They don't have hand-checked names for popular products yet.
+Overall, 1.4% (es) to 2.9% (it) of generated product names stay identical
+to the English name, mostly brand names ("Cheerios Honey Nut", "Smartwater").
 
 ---
 

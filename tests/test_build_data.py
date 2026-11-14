@@ -111,39 +111,69 @@ class TestLanguageFiles(unittest.TestCase):
             self.assertTrue(all(name.strip() for name in names), msg=lang)
 
 
-class TestCuratedFrenchNames(unittest.TestCase):
+CURATED_LOCALES = {"fr": "fr_FR", "it": "it_IT", "es": "es_ES", "pt": "pt_PT", "de": "de_DE"}
+
+
+class TestCuratedNames(unittest.TestCase):
+    """Hand-checked names of the 2,000 most ordered products, per language."""
+
     @classmethod
     def setUpClass(cls):
-        cls.curated = load_json(os.path.join(TRANSLATIONS_DIR, "product_names_fr.json"))
-        cls.provider = GroceryStoreProvider(Faker("fr_FR"))
+        cls.curated = {
+            lang: load_json(os.path.join(TRANSLATIONS_DIR, f"product_names_{lang}.json")) for lang in CURATED_LOCALES
+        }
+        cls.providers = {lang: GroceryStoreProvider(Faker(locale)) for lang, locale in CURATED_LOCALES.items()}
 
     def test_curated_names_are_used_in_the_catalog(self):
-        name_col = self.provider._data["name_col"]["fr"]
-        for product_id, name in self.curated.items():
-            self.assertEqual(self.provider._data["by_id"][int(product_id)][name_col], name)
+        for lang, curated in self.curated.items():
+            data = self.providers[lang]._data
+            name_col = data["name_col"][lang]
+            for product_id, name in curated.items():
+                self.assertEqual(data["by_id"][int(product_id)][name_col], name, msg=(lang, product_id))
 
     def test_curated_names_cover_the_most_ordered_products(self):
-        data = self.provider._data
+        data = self.providers["fr"]._data
         order_col = data["meta"]["product_fields"].index("order_count")
-        top = sorted(data["products"], key=lambda row: (-row[order_col], row[0]))[:2000]
-        self.assertEqual({str(row[0]) for row in top}, set(self.curated))
+        top = {str(row[0]) for row in sorted(data["products"], key=lambda row: (-row[order_col], row[0]))[:2000]}
+        for lang, curated in self.curated.items():
+            self.assertEqual(top, set(curated), msg=lang)
 
-    def test_curated_names_are_non_empty_and_known_products(self):
-        for product_id, name in self.curated.items():
-            self.assertTrue(name.strip(), msg=product_id)
-            self.assertIn(int(product_id), self.provider._data["by_id"])
+    def test_curated_names_are_non_empty_clean_and_known_products(self):
+        for lang, curated in self.curated.items():
+            for product_id, name in curated.items():
+                self.assertTrue(name.strip(), msg=(lang, product_id))
+                self.assertEqual(name, " ".join(name.split()), msg=(lang, product_id))
+                self.assertIn(int(product_id), self.providers[lang]._data["by_id"])
+
+    def test_curated_names_are_translated(self):
+        # Brand-only names ("Smartwater", "Cheerios Honey Nut") legitimately
+        # stay the same; anything beyond a few percent means a missed batch.
+        english = {str(row[0]): row[self.providers["fr"]._data["name_col"]["en"]]
+                   for row in self.providers["fr"]._data["products"]}
+        for lang, curated in self.curated.items():
+            same = sum(1 for product_id, name in curated.items() if name == english[product_id])
+            self.assertLess(same, 100, msg=lang)
 
     def test_known_good_translations(self):
-        # Regression guard for errors a small local LLM made on these.
-        expected = {"27966": "Framboises bio", "26209": "Citrons verts", "18987": "Pains à hot-dog",
-                    "12442": "Liquide vaisselle au basilic", "21903": "Jeunes pousses d'épinards bio"}
-        for product_id, name in expected.items():
-            self.assertEqual(self.curated[product_id], name)
+        # Regression guard for errors a small local LLM made on these (fr),
+        # and spot checks for the other languages.
+        expected = {
+            "fr": {"27966": "Framboises bio", "26209": "Citrons verts", "18987": "Pains à hot-dog",
+                   "12442": "Liquide vaisselle au basilic", "21903": "Jeunes pousses d'épinards bio"},
+            "it": {"27966": "Lamponi bio", "24852": "Banana", "18987": "Panini per hot dog"},
+            "es": {"27966": "Frambuesas ecológicas", "24852": "Plátano", "12442": "Lavavajillas a mano de albahaca"},
+            "pt": {"27966": "Framboesas biológicas", "26209": "Limas", "21137": "Morangos biológicos"},
+            "de": {"27966": "Bio-Himbeeren", "24852": "Banane", "18987": "Hotdog-Brötchen"},
+        }
+        for lang, names in expected.items():
+            for product_id, name in names.items():
+                self.assertEqual(self.curated[lang][product_id], name, msg=lang)
 
-    def test_curated_file_is_sorted_and_valid_json(self):
-        with open(os.path.join(TRANSLATIONS_DIR, "product_names_fr.json"), encoding="utf-8") as f:
-            ids = list(json.load(f))
-        self.assertEqual(ids, sorted(ids, key=int))
+    def test_curated_files_are_sorted_and_valid_json(self):
+        for lang in CURATED_LOCALES:
+            with open(os.path.join(TRANSLATIONS_DIR, f"product_names_{lang}.json"), encoding="utf-8") as f:
+                ids = list(json.load(f))
+            self.assertEqual(ids, sorted(ids, key=int), msg=lang)
 
 
 if __name__ == "__main__":
