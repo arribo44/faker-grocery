@@ -16,7 +16,13 @@ from faker_grocery import GroceryStoreProvider
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
-from build_data import base_price_for, price_range_for, triangular_price  # noqa: E402
+from build_data import (  # noqa: E402
+    base_price_for,
+    load_aisle_complements,
+    merge_tail,
+    price_range_for,
+    triangular_price,
+)
 from store_tables import parse_size, season_mask  # noqa: E402
 
 
@@ -174,7 +180,7 @@ class TestCoherentBaskets(unittest.TestCase):
         fake = make_faker("en_US")
         by_id = provider_of(fake)._data["by_id"]
         with_pasta = with_sauce = 0
-        for _ in range(600):
+        for _ in range(3000):
             aisles = {by_id[item["product_id"]][1] for item in fake.grocery_list(coherent=coherent)["items"]}
             if 131 in aisles:  # dry pasta
                 with_pasta += 1
@@ -183,7 +189,7 @@ class TestCoherentBaskets(unittest.TestCase):
         return with_sauce / with_pasta
 
     def test_complements_make_pasta_and_sauce_go_together(self):
-        self.assertGreater(self.pasta_with_sauce_rate(True), self.pasta_with_sauce_rate(False) + 0.3)
+        self.assertGreater(self.pasta_with_sauce_rate(True), self.pasta_with_sauce_rate(False) + 0.15)
 
     def test_item_count_is_kept(self):
         fake = make_faker()
@@ -297,6 +303,57 @@ class TestReceipts(unittest.TestCase):
         store = make_faker().grocery_store()
         self.assertTrue(store["name"] and store["address"])
         self.assertTrue(1 <= store["store_id"] <= 9999)
+
+
+class TestMeasuredBehaviour(unittest.TestCase):
+    """Behaviour driven by the Instacart order statistics (DATAS/)."""
+
+    def test_complements_come_from_co_purchases(self):
+        complements = {(a, b): p for a, b, p in load_aisle_complements()}
+        self.assertIn((131, 9), complements)  # dry pasta -> pasta sauce
+        self.assertIn((43, 106), complements)  # buns rolls -> hot dogs bacon sausage
+        self.assertTrue(all(0 < p <= 0.4 for p in complements.values()))
+        per_aisle = {}
+        for a, _ in complements:
+            per_aisle[a] = per_aisle.get(a, 0) + 1
+        self.assertLessEqual(max(per_aisle.values()), 3)
+
+    def test_merge_tail(self):
+        self.assertEqual(merge_tail([[1, 5], [2, 3], [3, 2], [4, 1]], 3), [[1, 5], [2, 3], [3, 3]])
+
+    def test_basket_sizes_follow_instacart(self):
+        fake = make_faker("en_US")
+        counts = [fake.grocery_list()["item_count"] for _ in range(2000)]
+        self.assertAlmostEqual(statistics.mean(counts), 10.1, delta=1.0)  # Instacart mean, couple
+        self.assertLess(statistics.median(counts), statistics.mean(counts))  # skewed: many small baskets
+        singles = [fake.grocery_list(family_size=1)["item_count"] for _ in range(1000)]
+        families = [fake.grocery_list(family_size=5)["item_count"] for _ in range(1000)]
+        self.assertLess(statistics.mean(singles) * 1.5, statistics.mean(families))
+
+    def test_one_bound_clamps_the_measured_count(self):
+        fake = make_faker()
+        self.assertTrue(all(fake.grocery_list(min_items=12)["item_count"] >= 12 for _ in range(50)))
+        self.assertTrue(all(fake.grocery_list(max_items=4)["item_count"] <= 4 for _ in range(50)))
+        with self.assertRaises(ValueError):
+            fake.grocery_list(min_items=-1)
+
+    def test_customer_behaviour_follows_instacart(self):
+        fake = make_faker()
+        profiles = [fake.customer_profile() for _ in range(300)]
+        intervals = [p["shopping_interval_days"] for p in profiles]
+        self.assertTrue(all(1 <= i <= 30 for i in intervals))
+        self.assertGreater(intervals.count(7) + intervals.count(30), 0.15 * len(intervals))
+        rates = [p["reorder_rate"] for p in profiles]
+        self.assertAlmostEqual(statistics.mean(rates), 0.45, delta=0.08)
+
+    def test_favorites_are_re_ordered_staples(self):
+        fake = make_faker()
+        data = provider_of(fake)._data
+        col, order_col = data["reorder_count_col"], data["order_count_col"]
+        favorites = [pid for _ in range(30) for pid in fake.customer_profile()["favorite_product_ids"]]
+        rows = [data["by_id"][pid] for pid in favorites]
+        share = sum(r[col] for r in rows) / sum(r[order_col] for r in rows)
+        self.assertGreater(share, 0.6)  # more re-ordered than the catalog average (~59%)
 
 
 class TestReproducibility(unittest.TestCase):

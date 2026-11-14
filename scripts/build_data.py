@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build faker_grocery/data/grocery_data.json from the raw CSV dataset in DATAS/
+Build faker_grocery/data/grocery_data.json.gz (and names_<lang>.json.gz) from the raw CSV dataset in DATAS/
 (aisles.csv, departments.csv, products.csv - Instacart Market Basket Analysis
 open dataset) plus the hand-curated translation files in scripts/translations/.
 
@@ -9,13 +9,13 @@ add scripts/translations/word_dict_<lang>.json (+ departments_<lang>.json and
 aisles_<lang>.json) and add <lang> to LANGUAGES below.
 """
 import csv
+import gzip
 import json
 import os
 import random
 import re
 
 from store_tables import (
-    AISLE_COMPLEMENTS,
     AISLE_SIZES,
     COUNTRY_OPENING_HOURS,
     COUNTRY_VAT,
@@ -36,7 +36,7 @@ from store_tables import (
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATAS_DIR = os.path.join(ROOT, "DATAS")
 TRANSLATIONS_DIR = os.path.join(ROOT, "scripts", "translations")
-OUTPUT_PATH = os.path.join(ROOT, "faker_grocery", "data", "grocery_data.json")
+OUTPUT_PATH = os.path.join(ROOT, "faker_grocery", "data", "grocery_data.json.gz")
 
 # Source language of the raw dataset.
 SOURCE_LANG = "en"
@@ -56,6 +56,15 @@ NOUN_FIRST_LANGUAGES = {"fr", "it", "es", "pt"}
 TOKEN_RE = re.compile(r"[A-Za-z']+|[^A-Za-z']+")
 
 
+def write_json_gz(path, obj):
+    """Write `obj` as compact, gzip-compressed JSON (~3x smaller package).
+    mtime=0 and no file name in the header keep the output byte-identical
+    across rebuilds of the same data."""
+    payload = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    with open(path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=9) as f:
+        f.write(payload)
+
+
 def load_json(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -63,7 +72,9 @@ def load_json(path):
 
 # Punctuation that splits a product name into independently reorderable
 # segments ("Napkins, Dinner, Ultra White" -> 3 segments).
-SEGMENT_SPLIT_RE = re.compile(r"(\s*[,;/&()\-]\s*)")
+# Linking words also split segments, so the halves of "Diced Tomatoes with
+# Italian Herbs" are reordered separately instead of swapping places.
+SEGMENT_SPLIT_RE = re.compile(r"(\s*[,;/&()\-]\s*|\s+(?:with|and|or|in|for|of)\s+)", re.IGNORECASE)
 
 
 def protect_phrases(name, phrases):
@@ -85,15 +96,46 @@ def protect_phrases(name, phrases):
     return name, entries
 
 
-def fallback_translation(name, word_dict, phrases, reorder=True):
+# Function words written in lower case inside a name, as on real shelf
+# labels ("Rigatoni avec sauce", not "Rigatoni Avec Sauce"), even though the
+# English name capitalizes every word.
+FUNCTION_WORDS = {
+    "fr": {"avec", "de", "du", "des", "d'", "et", "ou", "sans", "au", "aux", "à", "en", "pour", "la", "le",
+           "les", "sur", "par"},
+    "it": {"con", "di", "da", "del", "della", "e", "o", "senza", "al", "alla", "allo", "ai", "in", "per", "il",
+           "la", "le", "su"},
+    "es": {"con", "de", "del", "y", "o", "sin", "al", "a", "en", "para", "el", "la", "los", "las", "por"},
+    "pt": {"com", "de", "do", "da", "dos", "das", "e", "ou", "sem", "ao", "à", "em", "para", "o", "a", "os",
+           "as", "por"},
+    "de": {"mit", "und", "oder", "ohne", "aus", "von", "vom", "zum", "zur", "für", "in", "im", "auf", "nach"},
+}
+
+
+def fallback_translation(name, word_dict, phrases, reorder=True, function_words=frozenset()):
     """Translation for products without a hand-checked one: known
     expressions first, then word-order reversal (for noun-first languages),
-    then word substitution."""
+    then word substitution, with `function_words` in lower case except at
+    the start of the name."""
     name, entries = protect_phrases(name, phrases)
     words = {**word_dict, **entries}
     if reorder:
         name = reorder_words(name, words)
-    return translate_name(name, words)
+    return lowercase_function_words(translate_name(name, words), function_words)
+
+
+def lowercase_function_words(name, function_words):
+    """'Rigatoni Avec Sauce' -> 'Rigatoni avec Sauce' (not the first word)."""
+    if not function_words:
+        return name
+    parts = re.split(r"(\s+)", name)
+    seen_word = False
+    for index, part in enumerate(parts):
+        if not part or part.isspace():
+            continue
+        if seen_word and part.lower() in function_words and not part.isupper():
+            parts[index] = part.lower()
+        seen_word = True
+    return "".join(parts)
 
 
 def reorder_words(name, word_dict):
@@ -659,9 +701,63 @@ def load_order_time_weights():
 
 
 def load_product_popularity():
-    """product_id -> number of times it was ordered (absent: never ordered)."""
+    """product_id -> (times it was ordered, times it was re-ordered by the
+    same customer); absent: never ordered."""
     with open(os.path.join(DATAS_DIR, "product_popularity.csv"), encoding="utf-8") as f:
-        return {int(row["product_id"]): int(row["order_count"]) for row in csv.DictReader(f)}
+        return {
+            int(row["product_id"]): (int(row["order_count"]), int(row["reorder_count"]))
+            for row in csv.DictReader(f)
+        }
+
+
+def load_counts(name, key_col, count_col="order_count"):
+    with open(os.path.join(DATAS_DIR, name), encoding="utf-8") as f:
+        return [[int(row[key_col]), int(row[count_col])] for row in csv.DictReader(f)]
+
+
+# Complementary aisles (coherent baskets), from the Instacart co-purchase
+# statistics: aisle B complements aisle A when orders containing A contain B
+# at least COMPLEMENT_MIN_LIFT times as often as orders in general, and at
+# least COMPLEMENT_MIN_EXCESS more often in absolute terms (so rare aisles
+# with a high lift don't qualify). The probability of adding B after an item
+# from A is that excess P(B|A) - P(B), capped; at most COMPLEMENT_MAX per aisle.
+COMPLEMENT_MIN_LIFT = 2.0
+COMPLEMENT_MIN_EXCESS = 0.03
+COMPLEMENT_MAX = 3
+COMPLEMENT_MAX_PROBABILITY = 0.4
+COMPLEMENT_MIN_ORDERS = 2000
+
+
+def merge_tail(counts, limit):
+    """[[value, count], ...] with every value above `limit` merged into it."""
+    merged = [[value, count] for value, count in counts if value < limit]
+    merged.append([limit, sum(count for value, count in counts if value >= limit)])
+    return merged
+
+
+def load_aisle_complements():
+    """[[aisle_id, complementary_aisle_id, probability], ...] (see above)."""
+    total_orders = sum(count for _, count in load_counts("basket_sizes.csv", "item_count"))
+    aisle_orders = dict(load_counts("aisle_orders.csv", "aisle_id"))
+    pairs = {}
+    with open(os.path.join(DATAS_DIR, "aisle_pairs.csv"), encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            a, b, count = int(row["aisle_id"]), int(row["other_aisle_id"]), int(row["order_count"])
+            pairs[a, b] = pairs[b, a] = count
+    complements = []
+    for a in sorted(aisle_orders):
+        candidates = []
+        for b in aisle_orders:
+            both = pairs.get((a, b), 0)
+            if b == a or both < COMPLEMENT_MIN_ORDERS:
+                continue
+            p_b_given_a, p_b = both / aisle_orders[a], aisle_orders[b] / total_orders
+            excess = p_b_given_a - p_b
+            if p_b_given_a / p_b >= COMPLEMENT_MIN_LIFT and excess >= COMPLEMENT_MIN_EXCESS:
+                candidates.append((excess, b))
+        for excess, b in sorted(candidates, reverse=True)[:COMPLEMENT_MAX]:
+            complements.append([a, b, round(min(excess, COMPLEMENT_MAX_PROBABILITY), 3)])
+    return complements
 
 
 def main():
@@ -696,7 +792,7 @@ def main():
     for product in products:
         product["unit"] = unit_for(product)
         product["base_price"] = base_price_for(product)
-        product["order_count"] = popularity.get(product["id"], 0)
+        product["order_count"], product["reorder_count"] = popularity.get(product["id"], (0, 0))
         product["size"] = size_for(product)
         product["season"] = season_mask(product["name"][SOURCE_LANG], product["aisle_id"])
 
@@ -719,7 +815,8 @@ def main():
         for product in products:
             curated = curated_names.get(str(product["id"]))
             product["name"][lang] = clean_name(curated or fallback_translation(
-                product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES
+                product["name"]["en"], word_dict, phrases, reorder=lang in NOUN_FIRST_LANGUAGES,
+                function_words=FUNCTION_WORDS.get(lang, frozenset()),
             ))
 
     languages = [SOURCE_LANG] + TRANSLATED_LANGUAGES
@@ -732,7 +829,7 @@ def main():
     # names.
     products_compact = [
         [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"],
-         p["size"], p["season"], p["name"][SOURCE_LANG]]
+         p["size"], p["season"], p["reorder_count"], p["name"][SOURCE_LANG]]
         for p in products
     ]
     # Tax class of each aisle: food (reduced rate) or standard.
@@ -791,7 +888,8 @@ def main():
         assert aisle_id in aisles, f"AISLE_SIZES: unknown aisle {aisle_id}"
         for unit in sizes:
             assert unit in aisle_units[aisle_id], f"AISLE_SIZES: aisle {aisle_id} has no unit {unit}"
-    for aisle_id, complement, probability in AISLE_COMPLEMENTS:
+    aisle_complements = load_aisle_complements()
+    for aisle_id, complement, probability in aisle_complements:
         assert str(aisle_id) in aisles and str(complement) in aisles and 0 < probability <= 1
     for country, hours in COUNTRY_OPENING_HOURS.items():
         assert 0 <= hours[0] < hours[1] <= 24, country
@@ -810,8 +908,8 @@ def main():
             "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
             "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
-                               "size", "season", f"name_{SOURCE_LANG}"],
-            "name_files": {lang: f"names_{lang}.json" for lang in TRANSLATED_LANGUAGES},
+                               "size", "season", "reorder_count", f"name_{SOURCE_LANG}"],
+            "name_files": {lang: f"names_{lang}.json.gz" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
         "aisles": aisles,
@@ -834,25 +932,27 @@ def main():
         "country_opening_hours": COUNTRY_OPENING_HOURS,
         "country_vat": COUNTRY_VAT,
         "aisle_tax_class": aisle_tax_class,
-        "aisle_complements": AISLE_COMPLEMENTS,
+        "aisle_complements": aisle_complements,
+        # Instacart distributions: items per order (sizes over 60 merged
+        # into 60), customers per median days between orders (capped at 30
+        # by Instacart), customers per re-order share (in %).
+        "basket_sizes": merge_tail(load_counts("basket_sizes.csv", "item_count"), 60),
+        "customer_intervals": load_counts("customer_intervals.csv", "median_days", "customer_count"),
+        "customer_reorder_rates": load_counts("customer_reorder_rates.csv", "reorder_pct", "customer_count"),
         "store_name_templates": STORE_NAME_TEMPLATES,
         "promotion_labels": PROMOTION_LABELS,
         "products": products_compact,
     }
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        # Compact separators: indentation would roughly double the file size
-        # for no benefit (nobody reads a 50k-row JSON by hand).
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    write_json_gz(OUTPUT_PATH, data)
 
     size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
     print(f"Wrote {OUTPUT_PATH} ({size_mb:.2f} MB, {len(products_compact)} products)")
 
     for lang in TRANSLATED_LANGUAGES:
         names_path = os.path.join(os.path.dirname(OUTPUT_PATH), data["meta"]["name_files"][lang])
-        with open(names_path, "w", encoding="utf-8") as f:
-            json.dump([p["name"][lang] for p in products], f, ensure_ascii=False, separators=(",", ":"))
+        write_json_gz(names_path, [p["name"][lang] for p in products])
         print(f"Wrote {names_path} ({os.path.getsize(names_path) / (1024 * 1024):.2f} MB)")
 
 

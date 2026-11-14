@@ -1,8 +1,9 @@
 """
 Hand-made store tables used by build_data.py: package sizes, seasonality,
-premium surcharge, VAT, opening hours, complementary aisles, store names and
-promotion labels. Approximate, "faker-grade" data: plausible orders of
-magnitude, not a reference.
+premium surcharge, VAT, opening hours, store names and promotion labels.
+Approximate, "faker-grade" data: plausible orders of magnitude, not a
+reference. (Complementary aisles and customer behaviour are measured on the
+Instacart data instead, see build_order_stats.py.)
 
 Sizes are [count, amount, unit]: [1, 500, "g"] is "500 g", [6, 330, "ml"]
 "6 x 330 mL", [12, None, None] "12 pieces" (a count without weight/volume).
@@ -279,20 +280,6 @@ COUNTRY_VAT = {
 # care, household; plus non-food baby aisles (diapers, accessories, bath).
 STANDARD_RATE_DEPARTMENTS = {2, 5, 8, 11, 17}
 STANDARD_RATE_AISLES = {56, 82, 102}
-
-# -- complementary aisles --------------------------------------------------------
-
-# [aisle, complementary aisle, probability]: after an item from `aisle`, a
-# coherent basket adds an item from the complementary aisle with that
-# probability (pasta -> pasta sauce, cereal -> milk...). Hand-made: the
-# Instacart co-purchase data isn't in this repository.
-AISLE_COMPLEMENTS = [
-    [131, 9, 0.5], [9, 131, 0.4], [121, 84, 0.4], [107, 67, 0.25], [107, 51, 0.15],
-    [43, 106, 0.3], [106, 43, 0.3], [128, 30, 0.3], [78, 21, 0.25], [78, 2, 0.15],
-    [112, 36, 0.2], [112, 88, 0.2], [26, 53, 0.3], [94, 29, 0.2], [130, 29, 0.4],
-    [79, 77, 0.2], [27, 107, 0.25], [28, 2, 0.25], [37, 103, 0.2], [59, 128, 0.15],
-    [63, 66, 0.2], [66, 63, 0.2], [105, 86, 0.3], [105, 17, 0.3], [17, 86, 0.25],
-]
 
 # -- store names / promotions ----------------------------------------------------
 

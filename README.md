@@ -12,38 +12,39 @@ The catalog is built from the [Instacart Market Basket Analysis](https://www.kag
 |----------|------------------|-----------------------|----------------|
 | `en` | `en_US` | Original English names | Original English names |
 | `fr` | `fr_FR`, `fr_CA`, `fr_BE`... | Hand-translated | Natural translation for the 2,000 most ordered products (~2/3 of generated products); approximate automatic translation for the rest |
-| `it` | `it_IT` | Hand-translated | Approximate automatic translation |
-| `es` | `es_ES`, `es_MX`... | Hand-translated | Approximate automatic translation |
-| `pt` | `pt_PT`, `pt_BR` | Hand-translated (European Portuguese) | Approximate automatic translation |
-| `de` | `de_DE`, `de_AT`, `de_CH` | Hand-translated | Approximate automatic translation (word order kept, see below) |
+| `it` | `it_IT` | Hand-translated | Same as French |
+| `es` | `es_ES`, `es_MX`... | Hand-translated | Same as French |
+| `pt` | `pt_PT`, `pt_BR` | Hand-translated (European Portuguese) | Same as French (European Portuguese) |
+| `de` | `de_DE`, `de_AT`, `de_CH` | Hand-translated | Same as French (automatic part keeps the English word order, see below) |
 
 > **Default language**: `en` (used for any locale not listed above, e.g. as a fallback).
 
 Unit labels are translated in every language ("bouteille", "bottiglia",
 "botella", "garrafa", "Flasche"). Only the product names of the language(s)
-you actually use are loaded (one `names_<lang>.json` file per language).
+you actually use are loaded (one `names_<lang>.json.gz` file per language).
 
-French product names come from two sources:
+Translated product names come from two sources:
 
-- **The 2,000 most ordered products** have a natural, checked translation
-  (`scripts/translations/product_names_fr.json`): French shelf-label style,
-  brands kept as is - "Organic Raspberries" -> "Framboises bio", "White
-  Balsamic Vinegar" -> "Vinaigre balsamique blanc". Since products are picked
-  by popularity, they make up about **two thirds** of generated products.
+- **The 2,000 most ordered products** have a natural, checked translation in
+  every language (`scripts/translations/product_names_<lang>.json`), in
+  shelf-label style, brands kept as is: "Organic Raspberries" -> "Framboises
+  bio", "Lamponi bio", "Frambuesas ecológicas", "Framboesas biológicas",
+  "Bio-Himbeeren". Since products are picked by popularity, they make up
+  about **two thirds** of generated products.
 - **All other products** are translated automatically: common expressions
-  first ("gluten free" -> "sans gluten", `phrases_fr.json`), then the word
-  order of fully known segments is reversed (French puts the noun first),
-  then word-by-word substitution with a ~860-word grocery dictionary
-  (`word_dict_fr.json`). Brand names stay untranslated. This is approximate,
-  "faker-grade" output ("Hot-dogs Bœuf Bio"), fine for tests and demos but
-  not a professional localization.
+  first ("gluten free" -> "sans gluten", `phrases_<lang>.json`), then the
+  word order of fully known segments is reversed for the Romance languages
+  (they put the noun first; segments are split at punctuation and linking
+  words such as "with" or "and"), then word-by-word substitution with a
+  ~1,200-word grocery dictionary (`word_dict_<lang>.json`), with function
+  words in lower case inside the name ("Rigatoni avec Sauce"). Brand names
+  stay untranslated. This is approximate, "faker-grade" output ("Tomates en
+  dés Bio avec Herbes Italien"), fine for tests and demos but not a
+  professional localization. German keeps the English word order, since it
+  also puts the noun last ("Glutenfrei Schokoladenstückchen Kekse").
 
-Italian, Spanish, Portuguese and German product names use that same
-automatic translation (with their own `word_dict_<lang>.json` and
-`phrases_<lang>.json`): "Biscotti Gocce di cioccolato Senza glutine",
-"Galletas Pepitas de chocolate Sin gluten". German keeps the English word
-order, since it also puts the noun last ("Glutenfrei Schokoladenstückchen
-Kekse"). They don't have hand-checked names for popular products yet.
+Overall, 1.4% (es) to 2.9% (it) of generated product names stay identical
+to the English name, mostly brand names ("Cheerios Honey Nut", "Smartwater").
 
 ---
 
@@ -273,8 +274,10 @@ fake.grocery_item()
 # produce, counters (meat, seafood, cheese, deli), bulk goods and drinks
 # are sold this way; everything else is counted.
 
-# family_size defaults to 2 (a couple). It scales the default item-count
-# range and the plausible quantity of each item (bigger households buy more).
+# The number of items follows the distribution of the ~3.2M Instacart baskets
+# (many small baskets, a few very big ones, ~10 items on average), scaled by
+# family_size (default 2, a couple: x0.8 for one person, +20% per extra
+# person), which also scales the plausible quantity of each item.
 shopping_list = fake.grocery_list()
 # {
 #     'items': [ ... grocery_item dicts ... ],
@@ -285,14 +288,16 @@ shopping_list = fake.grocery_list()
 # }
 
 fake.grocery_list(family_size=5)                       # bigger default basket
-fake.grocery_list(min_items=3, max_items=8)             # override the item-count range explicitly
+fake.grocery_list(min_items=3, max_items=8)             # uniform item count in that range
+fake.grocery_list(max_items=5)                          # measured count, capped at 5
 fake.grocery_list(department="fruits et légumes")       # restrict the whole list to one department
 fake.grocery_list(coherent=False)                       # no complementary products (see below)
 
 # Baskets are coherent by default: an item sometimes brings a complementary
-# one (pasta -> pasta sauce, cereal -> milk, chips -> dip, beer -> chips,
-# pancake mix -> syrup...), within the item count. These pairings are
-# hand-made: the Instacart co-purchase data isn't in this repository.
+# one (pasta -> pasta sauce, burger buns -> sausages, granola -> yogurt,
+# chips -> dip...), within the item count. The 263 pairings and their
+# probabilities are measured on the ~3.2M Instacart baskets: aisles bought
+# together at least twice as often as by chance.
 
 # Optionally attach a plausible shopping date/time (within the last year,
 # during the country's store opening hours, see grocery_opening_hours()).
@@ -318,8 +323,8 @@ fake.shopping_datetime(weighted=False)                  # uniform day and hour
 ```python
 customer = fake.customer_profile()      # or customer_profile(family_size=4)
 # {'customer_id': 106053, 'name': 'Théophile Gosselin', 'family_size': 3,
-#  'favorite_product_ids': [10246, 49044, ...],   # 8 + 4 per person, popular products
-#  'shopping_interval_days': 7,                    # 3 to 30, weekly most often
+#  'favorite_product_ids': [10246, 49044, ...],   # 8 + 4 per person, often re-ordered products
+#  'shopping_interval_days': 7,                    # 1 to 30, weekly and monthly most often
 #  'reorder_rate': 0.54}                           # share of items re-ordered from favorites
 
 history = fake.customer_history(customer, trips=12)    # 12 baskets, oldest first
@@ -329,9 +334,11 @@ history = fake.customer_history(trips=12, end_date=datetime.date(2026, 6, 30))
 # third) and each item is a re-order of a favorite with probability reorder_rate.
 ```
 
-The orders of magnitude (weekly shopping most common, ~60% re-orders) are
-Instacart's, but hand-coded: the per-customer Instacart data isn't in this
-repository.
+Measured on the ~206,000 Instacart customers: the shopping interval follows
+the distribution of their median days between orders, the re-order rate the
+distribution of their share of re-ordered items (~45% on average), and
+favorites are picked in proportion to how often products are re-ordered
+(milk, bananas, eggs rather than one-off purchases).
 
 ### 🧾 Receipts
 
@@ -422,11 +429,29 @@ Prices are typed `float`; they are ints for currencies without minor units
 
 ---
 
-## 🎯 Demo
+## 🎯 Command line: demo and bulk export
+
+The package installs a `faker-grocery` command (also `python -m faker_grocery`):
 
 ```bash
-python -m faker_grocery
+faker-grocery                                    # demo, en_US and fr_FR
+faker-grocery demo --locale de_DE                # demo for one locale
+
+# Bulk export: baskets, receipts, customers (with their shopping history) or products
+faker-grocery export baskets -n 10000 --locale fr_FR --format csv -o baskets.csv
+faker-grocery export receipts -n 500 --format jsonl --seed 42 > receipts.jsonl
+faker-grocery export customers -n 200 --trips 12 --format json -o customers.json
+faker-grocery export products -n 5000 --locale it_IT --format csv -o products.csv
 ```
+
+- **Formats**: `csv` has one row per basket item (`baskets`, `customers`),
+  per receipt line (`receipts`) or per product, with the basket / receipt /
+  customer fields repeated on each row - ready for a spreadsheet, pandas or
+  a database import. `jsonl` (one record per line) and `json` keep the
+  nested structure. Dates are ISO 8601.
+- `--seed` makes the output reproducible; `--locale` sets the language,
+  currency, VAT, shopping hours and seasons; without `-o` the output goes
+  to standard output.
 
 For a complete demo with more examples per feature and both locales, see [`examples/basic_usage.py`](examples/basic_usage.py).
 
@@ -434,12 +459,12 @@ For a complete demo with more examples per feature and both locales, see [`examp
 
 ## 🧱 Data layout
 
-A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole catalog:
+A single gzip-compressed JSON file, `faker_grocery/data/grocery_data.json.gz`, holds the whole catalog:
 
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
-- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none)
-- translated product names live in separate files, `faker_grocery/data/names_<lang>.json` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
+- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, reorder_count, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none)
+- translated product names live in separate files, `faker_grocery/data/names_<lang>.json.gz` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
 - `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
 - `currencies`: `{code: {symbol, rate, price_level, decimals}}` - fixed approximate EUR -> currency rates and grocery price levels
 - `country_currencies`: `{country_code: currency_code}` - default currency per locale country (unlisted countries use EUR)
@@ -454,19 +479,25 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 - `premium_surcharge`, `seasonal_factors`, `southern_hemisphere_countries` - organic/premium price factor and seasonality settings
 - `default_opening_hours`, `country_opening_hours`: `{country_code: [open, close]}`
 - `country_vat`: `{country_code: [food_rate, standard_rate, included]}` and `aisle_tax_class`: `{aisle_id: "food"|"standard"}`
-- `aisle_complements`: `[[aisle_id, complementary_aisle_id, probability], ...]` - coherent baskets
+- `aisle_complements`: `[[aisle_id, complementary_aisle_id, probability], ...]` - coherent baskets, from the Instacart co-purchase statistics
+- `basket_sizes`, `customer_intervals`, `customer_reorder_rates`: `[[value, count], ...]` - Instacart distributions of items per order, customers' median days between orders and re-order share (%)
 - `store_name_templates`, `promotion_labels`: `{language: ...}` - receipts
 - `meta`: supported/default languages, name files, base currency, source, field layout
 
-> The store tables (sizes, seasons, VAT, opening hours, complements, store
-> names, promotions) are hand-made, in `scripts/store_tables.py`.
+> The store tables (sizes, seasons, VAT, opening hours, store names,
+> promotions) are hand-made, in `scripts/store_tables.py`.
 
-> `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only `grocery_data.json` is (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
+> `DATAS/*.csv` (the raw Instacart source: `aisles.csv`, `departments.csv`, `products.csv`, plus the aggregated order statistics `order_times.csv` and `product_popularity.csv`) is **not** shipped in the installed package - only the `faker_grocery/data/*.json.gz` files are (see `MANIFEST.in` and `[tool.setuptools.package-data]` in `pyproject.toml`), and using the library never touches `DATAS/`. It **is** kept versioned in the repository, though: `scripts/build_data.py` always rebuilds the catalog from these CSVs (never from `grocery_data.json.gz` itself), so they're the only way to regenerate the data at all - including to add a new language later (see below).
 
-> The two statistics files are themselves aggregated from the much larger
+> The statistics files (`order_times.csv`, `product_popularity.csv`,
+> `basket_sizes.csv`, `aisle_orders.csv`, `aisle_pairs.csv`,
+> `customer_intervals.csv`, `customer_reorder_rates.csv`) are themselves aggregated from the much larger
 > Instacart `orders.csv` (~109 MB) and `order_products__prior.csv` (~578 MB),
 > which are **not** versioned. They only need regenerating if the source data
-> changes: download them from the Kaggle dataset (see below), then run
+> changes: download them from the Kaggle dataset (see below; the anonymous
+> Kaggle download no longer works, but the Hugging Face mirror
+> [attik/Instacart-Market-Basket-Analysis](https://huggingface.co/datasets/attik/Instacart-Market-Basket-Analysis)
+> has the same files and reproduces the versioned statistics exactly), then run
 > `python scripts/build_order_stats.py path/to/orders.csv path/to/order_products__prior.csv`
 > followed by `python scripts/build_data.py`.
 
@@ -475,7 +506,7 @@ A single JSON file, `faker_grocery/data/grocery_data.json`, holds the whole cata
 The files are generated by [`scripts/build_data.py`](scripts/build_data.py) from the raw CSVs in `DATAS/` (`aisles.csv`, `departments.csv`, `products.csv`) plus the translation files in `scripts/translations/`. To add a language (e.g. `nl`):
 
 1. Create `scripts/translations/departments_nl.json` and `aisles_nl.json` (21 and 134 hand-translated entries).
-2. Create `scripts/translations/word_dict_nl.json` and `phrases_nl.json`, with the same keys as `word_dict_fr.json` / `phrases_fr.json` (a ~860-word grocery vocabulary and ~90 multi-word expressions translated as a whole).
+2. Create `scripts/translations/word_dict_nl.json` and `phrases_nl.json`, with the same keys as `word_dict_fr.json` / `phrases_fr.json` (a ~1,200-word grocery vocabulary and ~90 multi-word expressions translated as a whole).
 3. Optionally, create `scripts/translations/product_names_nl.json` (`{product_id: name}`) with natural translations of the most ordered products - they take precedence over the automatic translation. See `product_names_fr.json`.
 4. Add `"nl"` to `TRANSLATED_LANGUAGES`, and a `"nl"` label to every entry of `UNIT_LABELS`, in `scripts/build_data.py`. If the language puts the noun first (like French, Italian, Spanish, Portuguese), also add it to `NOUN_FIRST_LANGUAGES` so word order is reversed.
 5. Re-run:

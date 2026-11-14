@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bulk export from the command line**: a `faker-grocery` command (also `python -m faker_grocery`) with `export baskets|receipts|customers|products -n N --locale L --format csv|jsonl|json [-o FILE] [--seed S] [--trips T]`. CSV has one row per basket item / receipt line / product with the parent fields repeated; JSON and JSON Lines keep the nested structure. `faker-grocery demo [--locale L]` runs the demo for a given locale. 9 new tests (`tests/test_cli.py`).
+
+### Changed
+- **Coherent baskets, customers and basket sizes are now measured on the Instacart data** instead of hand-made rules:
+  - **Complementary products**: 263 aisle pairings (instead of 25 hand-made ones) with their probabilities, from the co-purchases of ~3.2M baskets: aisles bought together at least twice as often as by chance and at least 3 points more often (pasta -> pasta sauce 21%, burger buns -> sausages 19%, granola -> yogurt 28%...), at most 3 per aisle.
+  - **Basket sizes**: without both `min_items` and `max_items`, the item count follows the distribution of Instacart basket sizes (~10 items on average, many small baskets, a few very big ones), scaled by `family_size` (x0.8 for one person, x1 for a couple, +20% per extra person); a single bound clamps it. With both bounds, the count stays uniform between them.
+  - **Customers**: `customer_profile()` draws the shopping interval from the distribution of ~206,000 customers' median days between orders, the re-order rate from their share of re-ordered items (~45% on average), and favorites in proportion to how often products are re-ordered.
+- `scripts/build_order_stats.py` also writes `DATAS/basket_sizes.csv`, `aisle_orders.csv`, `aisle_pairs.csv`, `customer_intervals.csv`, `customer_reorder_rates.csv`, and a `reorder_count` column in `product_popularity.csv`; `grocery_data.json` products rows gained `reorder_count` (before `name_en`), new tables `basket_sizes`, `customer_intervals`, `customer_reorder_rates`. **Breaking for direct data access.**
+- Default basket sizes changed: the same seed yields different baskets than 0.10.0.
+- **Hand-checked Italian, Spanish, Portuguese and German names for the 2,000 most ordered products** (`scripts/translations/product_names_<lang>.json`, about two thirds of generated products), like the French ones: shelf-label style, brands kept ("Organic Raspberries" -> "Lamponi bio", "Frambuesas ecológicas", "Framboesas biológicas", "Bio-Himbeeren"). Generated names left in English drop from 5.9% to 2.9% (it), 4.1% to 1.4% (es), 5.1% to 2.7% (pt), 4.9% to 2.0% (de), mostly brand names.
+- **Better automatic translation** of product names (all products but the 2,000 hand-checked French ones): ~350 new words in every dictionary (858 -> 1,209: wash, chip, jam, floss, ointment, lentils, chickpeas...), so ~28% fewer names stay in English (French 3,018 -> 2,148); function words in lower case inside a name ("Rigatoni avec Sauce", "Brot mit Käse"); word order reversed separately on each side of linking words ("Diced Tomatoes with Italian Herbs" -> "Tomates en dés Bio avec Herbes Italien", no longer "Herbes Italien avec Tomates en dés").
+- **Catalog data files are gzip-compressed** (`grocery_data.json.gz`, `names_<lang>.json.gz`, built byte-for-byte reproducibly): the installed package takes ~5 MB on disk instead of ~13 MB. The download size is unchanged (wheels were already zip-compressed), and loading takes ~0.04 s longer. **Breaking for direct data access**: the files were renamed.
+- README: the raw Instacart files are no longer downloadable anonymously from Kaggle; the Hugging Face mirror used instead reproduces the versioned statistics exactly.
+
 ---
 
 ## [0.10.0] - 2026-11-14

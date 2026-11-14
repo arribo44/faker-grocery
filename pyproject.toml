@@ -29,6 +29,9 @@ classifiers = [
 test = ["pytest"]
 dev = ["pytest", "ruff", "build", "mypy"]
 
+[project.scripts]
+faker-grocery = "faker_grocery.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/arribo44/faker-grocery"
 Changelog = "https://github.com/arribo44/faker-grocery/blob/main/CHANGELOG.md"
@@ -41,7 +44,7 @@ include = ["faker_grocery*"]
 
 [tool.setuptools.package-data]
 "faker_grocery" = ["py.typed"]
-"faker_grocery.data" = ["*.json"]
+"faker_grocery.data" = ["*.json.gz"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
