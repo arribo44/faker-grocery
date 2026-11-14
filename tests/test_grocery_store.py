@@ -5,6 +5,7 @@ import datetime
 import unittest
 
 from faker import Faker
+from faker.config import AVAILABLE_LOCALES
 
 from faker_grocery import GroceryStoreProvider
 
@@ -587,6 +588,8 @@ class TestGroceryStoreProvider(unittest.TestCase):
                     "ro_RO": "RON", "th_TH": "THB", "vi_VN": "VND", "en_PH": "PHP", "ar_SA": "SAR",
                     "ar_BH": "BHD", "en_MS": "MYR", "de_LI": "CHF", "bg_BG": "EUR"}
         for locale, currency in expected.items():
+            if locale not in AVAILABLE_LOCALES:  # e.g. en_MS is missing from Faker 20.0.0
+                continue
             self.assertEqual(self._faker(locale).grocery_currency(), currency, msg=locale)
 
     def test_prices_use_the_currency_minor_unit(self):
