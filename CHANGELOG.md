@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-14
+
 ### Added
 - **Bulk export from the command line**: a `faker-grocery` command (also `python -m faker_grocery`) with `export baskets|receipts|customers|products -n N --locale L --format csv|jsonl|json [-o FILE] [--seed S] [--trips T]`. CSV has one row per basket item / receipt line / product with the parent fields repeated; JSON and JSON Lines keep the nested structure. `faker-grocery demo [--locale L]` runs the demo for a given locale. 9 new tests (`tests/test_cli.py`).
 
