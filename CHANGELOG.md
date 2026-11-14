@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.10.0] - 2026-11-14
 
 ### Added
 - **Till receipts**: `receipt(basket=None, promotion_rate=0.15, payment_method=None)` returns a fictional store (`grocery_store()`: id, localized name, address), receipt number, register, date/time, lines with promotions, VAT breakdown, total, payment method (card / cash / mobile), amount tendered and change. New `Receipt`, `ReceiptLine`, `TaxLine` and `GroceryStore` `TypedDict`s.
