@@ -187,9 +187,11 @@ fake.unit(department=7)                 # units plausible for that department
 ### 💱 Currency
 
 Prices are generated in the currency of the locale's country: `en_US` → USD,
-`en_GB` → GBP, `fr_CA` → CAD, `fr_CH` → CHF, `ja_JP` → JPY, etc. Eurozone
-countries, and any country not in the list, use EUR (the catalog's base
-currency). Prices are converted from EUR with **fixed approximate rates**
+`en_GB` → GBP, `fr_CA` → CAD, `fr_CH` → CHF, `ja_JP` → JPY, `es_AR` → ARS,
+`ko_KR` → KRW, `zh_CN` → CNY, `tr_TR` → TRY, etc.: **56 currencies**, covering
+the country of every Faker locale except Iran (`fa_IR`, no stable rate) and
+the generic `ar_AA`. Eurozone countries (Bulgaria included since 2026), and
+any country not in the list, use EUR (the catalog's base currency). Prices are converted from EUR with **fixed approximate rates**
 (not live exchange rates), then adjusted to the country's approximate
 **grocery price level**: a plain conversion would make a basket cost the
 same everywhere, whereas groceries are much dearer in Switzerland and much
@@ -197,7 +199,7 @@ cheaper in India. Within the eurozone the level is per country too
 (Portugal cheaper, Ireland dearer). Average default basket: ~85 EUR in
 France, ~69 EUR in Portugal, ~93 EUR in Ireland, ~107 USD in the US,
 ~128 CHF in Switzerland. Prices are rounded to the currency's minor unit
-(whole numbers for JPY/HUF). Every priced dict carries a `currency` field.
+(whole numbers for JPY, HUF, KRW, CLP, VND...; 3 decimals for BHD/JOD). Every priced dict carries a `currency` field.
 
 ```python
 fake = Faker("en_US")

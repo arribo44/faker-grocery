@@ -174,8 +174,8 @@ UNIT_LABELS = {
     },
     "tray": {"en": "tray", "fr": "barquette", "it": "vaschetta", "es": "bandeja", "pt": "cuvete", "de": "Schale"},
     "can": {"en": "can", "fr": "canette", "it": "lattina", "es": "lata", "pt": "lata", "de": "Dose"},  # drink can
-    "tin": {  # food can
-        "en": "can",
+    "tin": {  # food can (not "can": that's the drink can's English label)
+        "en": "tin",
         "fr": "boîte de conserve",
         "it": "scatoletta",
         "es": "lata de conserva",
@@ -439,6 +439,49 @@ CURRENCIES = {
     "INR": {"symbol": "₹", "rate": 92.0, "price_level": 0.3, "decimals": 2},
     "BRL": {"symbol": "R$", "rate": 6.0, "price_level": 0.6, "decimals": 2},
     "MXN": {"symbol": "$", "rate": 20.0, "price_level": 0.65, "decimals": 2},
+    # Other countries of Faker's locales (approximate 2025-2026 rates; price
+    # levels are rough orders of magnitude, from food price comparisons).
+    # Currencies whose minor unit isn't used in shops are rounded to whole
+    # numbers (CLP, COP, KRW, ISK, TWD, VND, IDR, UZS).
+    "ARS": {"symbol": "$", "rate": 1500.0, "price_level": 0.75, "decimals": 2},
+    "CLP": {"symbol": "$", "rate": 1050.0, "price_level": 0.8, "decimals": 0},
+    "COP": {"symbol": "$", "rate": 4500.0, "price_level": 0.55, "decimals": 0},
+    "KRW": {"symbol": "₩", "rate": 1550.0, "price_level": 1.3, "decimals": 0},
+    "CNY": {"symbol": "¥", "rate": 8.0, "price_level": 0.6, "decimals": 2},
+    "TWD": {"symbol": "NT$", "rate": 36.0, "price_level": 0.85, "decimals": 0},
+    "RUB": {"symbol": "₽", "rate": 95.0, "price_level": 0.5, "decimals": 2},
+    "UAH": {"symbol": "₴", "rate": 46.0, "price_level": 0.5, "decimals": 2},
+    "TRY": {"symbol": "₺", "rate": 46.0, "price_level": 0.45, "decimals": 2},
+    "ILS": {"symbol": "₪", "rate": 4.0, "price_level": 1.3, "decimals": 2},
+    "ZAR": {"symbol": "R", "rate": 20.0, "price_level": 0.5, "decimals": 2},
+    "RON": {"symbol": "lei", "rate": 5.0, "price_level": 0.65, "decimals": 2},
+    "ISK": {"symbol": "kr", "rate": 145.0, "price_level": 1.45, "decimals": 0},
+    "MKD": {"symbol": "ден", "rate": 61.5, "price_level": 0.6, "decimals": 2},
+    "ALL": {"symbol": "L", "rate": 98.0, "price_level": 0.65, "decimals": 2},
+    "BAM": {"symbol": "KM", "rate": 1.96, "price_level": 0.7, "decimals": 2},
+    "AZN": {"symbol": "₼", "rate": 1.9, "price_level": 0.5, "decimals": 2},
+    "AMD": {"symbol": "֏", "rate": 440.0, "price_level": 0.6, "decimals": 2},
+    "GEL": {"symbol": "₾", "rate": 3.0, "price_level": 0.6, "decimals": 2},
+    "UZS": {"symbol": "soʻm", "rate": 14000.0, "price_level": 0.4, "decimals": 0},
+    "THB": {"symbol": "฿", "rate": 38.0, "price_level": 0.55, "decimals": 2},
+    "VND": {"symbol": "₫", "rate": 28000.0, "price_level": 0.45, "decimals": 0},
+    "IDR": {"symbol": "Rp", "rate": 18000.0, "price_level": 0.5, "decimals": 0},
+    "PHP": {"symbol": "₱", "rate": 64.0, "price_level": 0.55, "decimals": 2},
+    "MYR": {"symbol": "RM", "rate": 4.9, "price_level": 0.55, "decimals": 2},
+    "PKR": {"symbol": "Rs", "rate": 310.0, "price_level": 0.3, "decimals": 2},
+    "BDT": {"symbol": "৳", "rate": 130.0, "price_level": 0.35, "decimals": 2},
+    "LKR": {"symbol": "Rs", "rate": 340.0, "price_level": 0.4, "decimals": 2},
+    "NPR": {"symbol": "Rs", "rate": 155.0, "price_level": 0.35, "decimals": 2},
+    "SAR": {"symbol": "SAR", "rate": 4.1, "price_level": 0.8, "decimals": 2},
+    "AED": {"symbol": "AED", "rate": 4.0, "price_level": 0.95, "decimals": 2},
+    "BHD": {"symbol": "BD", "rate": 0.41, "price_level": 0.85, "decimals": 3},
+    "JOD": {"symbol": "JD", "rate": 0.78, "price_level": 0.75, "decimals": 3},
+    "EGP": {"symbol": "E£", "rate": 55.0, "price_level": 0.3, "decimals": 2},
+    "DZD": {"symbol": "DA", "rate": 150.0, "price_level": 0.4, "decimals": 2},
+    "NGN": {"symbol": "₦", "rate": 1700.0, "price_level": 0.4, "decimals": 2},
+    "KES": {"symbol": "KSh", "rate": 145.0, "price_level": 0.5, "decimals": 2},
+    "GHS": {"symbol": "GH₵", "rate": 13.0, "price_level": 0.5, "decimals": 2},
+    "ETB": {"symbol": "Br", "rate": 160.0, "price_level": 0.4, "decimals": 2},
 }
 
 # Default currency for the country part of a Faker locale (e.g. "US" in
@@ -461,6 +504,16 @@ COUNTRY_CURRENCIES = {
     "IN": "INR",
     "BR": "BRL",
     "MX": "MXN",
+    "AR": "ARS", "CL": "CLP", "CO": "COP", "KR": "KRW", "CN": "CNY", "TW": "TWD",
+    "RU": "RUB", "UA": "UAH", "TR": "TRY", "IL": "ILS", "PS": "ILS", "ZA": "ZAR",
+    "RO": "RON", "IS": "ISK", "MK": "MKD", "AL": "ALL", "BA": "BAM", "AZ": "AZN",
+    "AM": "AMD", "GE": "GEL", "UZ": "UZS", "TH": "THB", "VN": "VND", "ID": "IDR",
+    "PH": "PHP", "MY": "MYR", "PK": "PKR", "BD": "BDT", "LK": "LKR", "NP": "NPR",
+    "SA": "SAR", "AE": "AED", "BH": "BHD", "JO": "JOD", "EG": "EGP", "DZ": "DZD",
+    "NG": "NGN", "KE": "KES", "GH": "GHS", "ET": "ETB", "LI": "CHF",
+    # Faker locale suffixes that aren't ISO country codes: fr_QC (Quebec),
+    # en_MS (Malaysian English, not Montserrat).
+    "QC": "CAD", "MS": "MYR",
 }
 
 # Approximate grocery price level per country, relative to France (1.0),
@@ -472,7 +525,7 @@ COUNTRY_PRICE_LEVELS = {
     "FR": 1.0, "DE": 0.95, "AT": 1.05, "BE": 1.0, "NL": 0.9, "LU": 1.1,
     "IE": 1.1, "IT": 0.95, "ES": 0.85, "PT": 0.82, "GR": 0.9, "FI": 1.05,
     "EE": 0.95, "LV": 0.9, "LT": 0.85, "SK": 0.85, "SI": 0.9, "HR": 0.9,
-    "CY": 0.95, "MT": 0.95,
+    "CY": 0.95, "MT": 0.95, "BG": 0.75,  # Bulgaria joined the euro on 2026-01-01
 }
 
 # Typical weekly shopping-time profiles, as 7x24 weights indexed

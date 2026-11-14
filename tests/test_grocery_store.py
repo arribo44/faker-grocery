@@ -447,6 +447,13 @@ class TestGroceryStoreProvider(unittest.TestCase):
         self.assertEqual(labels["can"]["fr"], "canette")
         self.assertEqual(self.fake.unit(aisle=59), "boîte de conserve")  # canned meals beans
 
+    def test_unit_labels_are_distinct_in_every_language(self):
+        labels = self.provider._data["unit_labels"]
+        for lang in self.provider._data["languages"]:
+            values = [label[lang] for label in labels.values()]
+            self.assertEqual(len(values), len(set(values)), msg=lang)
+        self.assertEqual(labels["tin"]["en"], "tin")
+
     def test_unit_with_aisle_filter(self):
         for _ in range(20):
             self.assertEqual(self.fake.unit(aisle=104), "pot")  # spices: jars only
@@ -570,7 +577,30 @@ class TestGroceryStoreProvider(unittest.TestCase):
             self.assertEqual(self._faker(locale).grocery_currency(), currency, msg=locale)
 
     def test_unlisted_country_falls_back_to_base_currency(self):
-        self.assertEqual(self._faker("en_PH").grocery_currency(), "EUR")
+        self.assertEqual(self._faker("fa_IR").grocery_currency(), "EUR")
+
+    def test_currency_of_other_faker_locales(self):
+        expected = {"es_AR": "ARS", "es_CL": "CLP", "es_CO": "COP", "ko_KR": "KRW", "zh_CN": "CNY",
+                    "zh_TW": "TWD", "ru_RU": "RUB", "tr_TR": "TRY", "he_IL": "ILS", "zu_ZA": "ZAR",
+                    "ro_RO": "RON", "th_TH": "THB", "vi_VN": "VND", "en_PH": "PHP", "ar_SA": "SAR",
+                    "ar_BH": "BHD", "en_MS": "MYR", "de_LI": "CHF", "bg_BG": "EUR"}
+        for locale, currency in expected.items():
+            self.assertEqual(self._faker(locale).grocery_currency(), currency, msg=locale)
+
+    def test_prices_use_the_currency_minor_unit(self):
+        for locale, decimals in [("ko_KR", 0), ("ar_BH", 3), ("tr_TR", 2)]:
+            fake = self._faker(locale)
+            for _ in range(20):
+                price = fake.product_record()["price"]
+                self.assertEqual(price, round(price, decimals), msg=locale)
+                if decimals == 0:
+                    self.assertIsInstance(price, int)
+
+    def test_bulgaria_uses_euro_at_its_own_price_level(self):
+        fake = self._faker("bg_BG")
+        provider = next(p for p in fake.providers if isinstance(p, GroceryStoreProvider))
+        self.assertEqual(provider._price_factor, provider._data["country_price_levels"]["BG"])
+        self.assertLess(provider._price_factor, 1.0)
 
     def test_grocery_currency_symbol(self):
         self.assertEqual(self.fake.grocery_currency(symbol=True), "€")

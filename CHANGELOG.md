@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **39 new currencies** (17 -> 56), so every country of Faker's locales gets its own currency and price level instead of EUR at the French level: ARS, CLP, COP, KRW, CNY, TWD, RUB, UAH, TRY, ILS, ZAR, RON, ISK, MKD, ALL, BAM, AZN, AMD, GEL, UZS, THB, VND, IDR, PHP, MYR, PKR, BDT, LKR, NPR, SAR, AED, BHD, JOD, EGP, DZD, NGN, KES, GHS, ETB (plus CHF for `de_LI`, ILS for `ar_PS`, CAD for `fr_QC`, MYR for `en_MS`). Fixed approximate rates and rough price levels, as for the other currencies; whole-number prices where the minor unit isn't used in shops (KRW, CLP, VND...), 3 decimals for BHD/JOD. Only Iran (`fa_IR`) and the generic `ar_AA` still fall back to EUR.
+- Bulgaria (`bg_BG`) uses EUR (euro since 2026-01-01) at its own price level (0.75).
+
 ### Fixed
 - `shopping_datetime()` raised `ValueError: Total of weights must be greater than zero` for opening hours no shopping pattern covers (e.g. `open_hour=22, close_hour=24` or `0, 6` in `fr_FR` / `de_DE`); the day is now picked uniformly in that case.
 - `grocery_list(max_items=2)` (only `max_items`, below the default minimum) raised `ValueError`; the default `min_items` now adapts to the given `max_items`.
@@ -19,13 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Numeric ids with surrounding spaces (`" 16 "`) are accepted; non-ASCII digits are rejected.
 - The catalog's first load is now thread-safe (two threads creating their first provider at once could lose the product names of a language).
 - Stale docstrings (supported languages, `language`, `grocery_item` unit).
+- The English label of the `tin` unit (food can) was "can", like drink cans (`can`): it is now "tin", so every unit has a distinct label in every language.
 
 ### Changed
 - **Beer is priced per container**: cans 0.80-3, bottles 1-4, packs 4-18 EUR instead of the alcohol department's 4-40 EUR (a can of beer used to cost ~19 EUR). Per-article ranges by (aisle, unit) also for fresh fruits (piece 0.20-2, tray 1.50-6), fresh vegetables (piece 0.30-3, bunch 0.80-3) and eggs (1.50-6). New `aisle_unit_price_ranges` table in `grocery_data.json`.
 - **Plausible units for the most ordered products** (`PRODUCT_UNIT_OVERRIDES` in `scripts/build_data.py`): strawberries and berries by the tray, onions and carrots by the kg, garlic by the piece, kale and cilantro by the bunch... and products whose name states a pack or container ("12 Pack Soda", "Milk Gallon") are no longer sold by the litre or gram. `aisle_units` includes these forced units.
 - Product names are cleaned of repeated/trailing spaces (412 English names, e.g. "TAI PEI      14OZ.SWEET & SOUR CHKN").
 - Base prices and units changed for the affected products: the same seed yields different values than 0.8.0.
-- 11 new tests (142 -> 153).
+- Translations of aisles and departments that were left in English: "granola" (aisle 57: "granola et muesli", "Knuspermüsli"...), fr "santé digestive" (70) and "crackers et biscuits salés" (78), es "galletas saladas" (78), department "snacks" in pt/de/it ("aperitivos e doces", "Snacks und Süßwaren", "snack e dolciumi"). Names that are the correct word in their language are kept (fr "condiments", de "Butter", it "yogurt").
+- 15 new tests (142 -> 157).
 
 ---
 
