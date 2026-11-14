@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.9.0] - 2026-11-14
 
 ### Added
 - **39 new currencies** (17 -> 56), so every country of Faker's locales gets its own currency and price level instead of EUR at the French level: ARS, CLP, COP, KRW, CNY, TWD, RUB, UAH, TRY, ILS, ZAR, RON, ISK, MKD, ALL, BAM, AZN, AMD, GEL, UZS, THB, VND, IDR, PHP, MYR, PKR, BDT, LKR, NPR, SAR, AED, BHD, JOD, EGP, DZD, NGN, KES, GHS, ETB (plus CHF for `de_LI`, ILS for `ar_PS`, CAD for `fr_QC`, MYR for `en_MS`). Fixed approximate rates and rough price levels, as for the other currencies; whole-number prices where the minor unit isn't used in shops (KRW, CLP, VND...), 3 decimals for BHD/JOD. Only Iran (`fa_IR`) and the generic `ar_AA` still fall back to EUR.
