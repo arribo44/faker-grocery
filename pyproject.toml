@@ -26,8 +26,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
-dev = ["pytest", "ruff", "build", "mypy"]
+test = ["pytest", "hypothesis"]
+dev = ["pytest", "hypothesis", "ruff", "build", "mypy", "pip-audit"]
 
 [project.scripts]
 faker-grocery = "faker_grocery.__main__:main"

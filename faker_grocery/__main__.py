@@ -8,20 +8,32 @@ Command line for faker_grocery: `python -m faker_grocery` (or the
     faker-grocery export receipts -n 500 --format jsonl --seed 42
     faker-grocery export customers -n 50 --trips 12 --format csv
     faker-grocery export products -n 2000 --format json
+    faker-grocery export products -n 500 --format csv --csv-safe -o products.csv
 
 CSV has one row per basket item (baskets, customers), per receipt line
 (receipts) or per product (products), the basket/receipt fields repeated on
-each row; JSON / JSON Lines keep the nested structure.
+each row; JSON / JSON Lines keep the nested structure. `--csv-safe` prefixes
+text cells starting with = + - @ (or a tab / carriage return) with a quote,
+so that spreadsheet software opening the file doesn't run them as formulas.
+
+With `-o`, the file is written next to its destination under a temporary
+name and only renamed once complete: an interrupted export leaves no
+half-written file behind.
 """
 import argparse
+import contextlib
 import csv
 import datetime
 import json
+import os
 import sys
+import tempfile
+import textwrap
 from collections.abc import Collection, Iterator
 from typing import IO, Any, TypeVar
 
 from faker import Faker
+from faker.config import AVAILABLE_LOCALES
 
 from faker_grocery import GroceryStoreProvider
 
@@ -150,10 +162,22 @@ def _json_default(value: object) -> str:
     raise TypeError(f"Not JSON serializable: {type(value).__name__}")
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value: Any, safe: bool) -> Any:
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    if safe and isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def export(kind: str, count: int, locale: str, fmt: str, out: IO[str], seed: int | None = None,
-           trips: int = 10) -> int:
+           trips: int = 10, csv_safe: bool = False) -> int:
     """Write `count` generated `kind` records to `out`; returns the number of
-    rows / records written."""
+    rows / records written. Records are generated and written one at a time,
+    so memory use doesn't grow with `count` (JSON included)."""
     fake = Faker(locale)
     if seed is not None:
         fake.seed_instance(seed)
@@ -161,9 +185,14 @@ def export(kind: str, count: int, locale: str, fmt: str, out: IO[str], seed: int
     records = _records(provider, kind, count, trips)
     written = 0
     if fmt == "json":
-        json.dump(list(records), out, ensure_ascii=False, indent=2, default=_json_default)
-        out.write("\n")
-        return count
+        # Same output as json.dump(list, indent=2), without the list in memory.
+        out.write("[")
+        for record in records:
+            text = json.dumps(record, ensure_ascii=False, indent=2, default=_json_default)
+            out.write(("," if written else "") + "\n" + textwrap.indent(text, "  "))
+            written += 1
+        out.write("\n]\n" if written else "]\n")
+        return written
     if fmt == "jsonl":
         for record in records:
             out.write(json.dumps(record, ensure_ascii=False, default=_json_default) + "\n")
@@ -172,7 +201,7 @@ def export(kind: str, count: int, locale: str, fmt: str, out: IO[str], seed: int
     writer: csv.DictWriter[str] | None = None
     for record in records:
         for row in _flat_rows(kind, record):
-            row = {k: v.isoformat() if isinstance(v, datetime.date) else v for k, v in row.items()}
+            row = {k: _csv_cell(v, csv_safe) for k, v in row.items()}
             if writer is None:
                 writer = csv.DictWriter(out, fieldnames=list(row), extrasaction="ignore", restval="")
                 writer.writeheader()
@@ -202,20 +231,72 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--seed", type=int, help="seed, for reproducible output")
     export_parser.add_argument("--trips", type=_positive, default=10,
                                help="baskets per customer, for 'customers' (default 10)")
+    export_parser.add_argument("--csv-safe", action="store_true",
+                               help="quote text cells starting with = + - @ (spreadsheet formula injection)")
     return parser
 
 
+def _check_locale(parser: argparse.ArgumentParser, locale: str) -> None:
+    if locale not in AVAILABLE_LOCALES:
+        close = sorted(name for name in AVAILABLE_LOCALES if name.split("_")[0] == locale.split("_")[0])
+        hint = f" (did you mean {', '.join(close)}?)" if close else ""
+        parser.error(f"unknown Faker locale: {locale!r}{hint}")
+
+
+def _export_to_file(args: argparse.Namespace) -> int:
+    """Write to a temporary file in the destination directory, renamed to
+    the destination only once the export is complete."""
+    path = os.path.abspath(args.output)
+    descriptor, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".faker-grocery-", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as out:
+            written = export(args.kind, args.count, args.locale, args.format, out, args.seed, args.trips,
+                             args.csv_safe)
+        os.chmod(temporary, 0o666 & ~_umask())
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+    return written
+
+
+def _umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    locales = args.locale if args.command == "demo" and args.locale else ["en_US", "fr_FR"]
     if args.command == "export":
-        if args.output:
-            with open(args.output, "w", encoding="utf-8", newline="") as out:
-                written = export(args.kind, args.count, args.locale, args.format, out, args.seed, args.trips)
-            print(f"Wrote {written} {'rows' if args.format == 'csv' else 'records'} to {args.output}", file=sys.stderr)
-        else:
-            export(args.kind, args.count, args.locale, args.format, sys.stdout, args.seed, args.trips)
+        locales = [args.locale]
+    for locale in locales:
+        _check_locale(parser, locale)
+    if args.command == "export":
+        try:
+            if args.output:
+                written = _export_to_file(args)
+                unit = "rows" if args.format == "csv" else "records"
+                print(f"Wrote {written} {unit} to {args.output}", file=sys.stderr)
+            else:
+                export(args.kind, args.count, args.locale, args.format, sys.stdout, args.seed, args.trips,
+                       args.csv_safe)
+        except BrokenPipeError:
+            # `faker-grocery export ... | head`: the reader left, not an error.
+            # Point stdout at devnull so the interpreter's final flush is quiet.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 0
+        except OSError as error:
+            print(f"faker-grocery: error: {error}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("faker-grocery: interrupted", file=sys.stderr)
+            return 130
         return 0
-    for locale in (args.locale if args.command == "demo" and args.locale else ["en_US", "fr_FR"]):
+    for locale in locales:
         demo(locale)
     return 0
 

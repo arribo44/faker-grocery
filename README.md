@@ -450,8 +450,16 @@ faker-grocery export products -n 5000 --locale it_IT --format csv -o products.cs
   a database import. `jsonl` (one record per line) and `json` keep the
   nested structure. Dates are ISO 8601.
 - `--seed` makes the output reproducible; `--locale` sets the language,
-  currency, VAT, shopping hours and seasons; without `-o` the output goes
-  to standard output.
+  currency, VAT, shopping hours and seasons (an unknown locale is rejected
+  with the close matches); without `-o` the output goes to standard output.
+- With `-o`, the file is only replaced once the export is complete: an
+  interrupted or failed export never leaves a half-written file. Records
+  are written as they are generated, so memory use stays flat even for
+  large `json` exports.
+- `--csv-safe` prefixes text cells starting with `=`, `+`, `-` or `@` with
+  a `'`, so that a spreadsheet opening the file can't run them as formulas
+  (CSV injection). Off by default because it also changes legitimate
+  values, such as promotion labels (`-30 %` -> `'-30 %`).
 
 For a complete demo with more examples per feature and both locales, see [`examples/basic_usage.py`](examples/basic_usage.py).
 
@@ -499,7 +507,9 @@ A single gzip-compressed JSON file, `faker_grocery/data/grocery_data.json.gz`, h
 > [attik/Instacart-Market-Basket-Analysis](https://huggingface.co/datasets/attik/Instacart-Market-Basket-Analysis)
 > has the same files and reproduces the versioned statistics exactly), then run
 > `python scripts/build_order_stats.py path/to/orders.csv path/to/order_products__prior.csv`
-> followed by `python scripts/build_data.py`.
+> followed by `python scripts/build_data.py`. The script first checks the
+> raw files' SHA-256 against the copy the statistics were built from, since
+> the mirror is a third party (`--no-verify` skips the check on purpose).
 
 ## 🌐 Adding a new language
 

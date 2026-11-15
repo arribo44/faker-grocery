@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `faker-grocery export --csv-safe`: prefixes text cells starting with `=`, `+`, `-`, `@` (or a tab / carriage return) with `'` against spreadsheet formula injection. Off by default, since it also changes promotion labels such as `-30 %`.
+- Property-based tests (`tests/test_properties.py`, hypothesis): valid EAN-13s, basket item counts and totals, receipt subtotal / discounts / taxes / total / change, product record consistency, for any seed over 8 locales (EUR, USD sales tax, JPY, BHD...). `hypothesis` joins the `test` extra.
+- `scripts/build_order_stats.py` checks the SHA-256 of the raw Instacart files (from a third-party mirror) before building; `--no-verify` skips it.
+
+### Changed
+- `faker-grocery export -o FILE` writes to a temporary file renamed once complete: a failed or interrupted export no longer leaves a half-written file (or destroys the previous one).
+- `--format json` is written record by record (same output as before) instead of building the whole list in memory.
+- CI / release: actions pinned by commit SHA (updated monthly by Dependabot), read-only default token, no persisted git credentials, new `pip-audit` job.
+
+### Fixed
+- `faker-grocery` with an unknown `--locale` now exits with a usage error and the close matches instead of a traceback; an unwritable `-o` path prints an error (exit code 1) and `| head` no longer prints a `BrokenPipeError`.
+
 ## [0.11.0] - 2026-11-14
 
 ### Added
