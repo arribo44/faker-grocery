@@ -15,6 +15,7 @@ import os
 import random
 import re
 
+from label_tables import DIET_NAMES, DIET_SHARES, DIETS, LABEL_NAMES, LABELS, diets_mask, labels_mask
 from store_tables import (
     AISLE_SIZES,
     COUNTRY_OPENING_HOURS,
@@ -795,6 +796,9 @@ def main():
         product["order_count"], product["reorder_count"] = popularity.get(product["id"], (0, 0))
         product["size"] = size_for(product)
         product["season"] = season_mask(product["name"][SOURCE_LANG], product["aisle_id"])
+        product["labels"] = labels_mask(product["name"][SOURCE_LANG], product["aisle_id"])
+        product["diets"] = diets_mask(product["name"][SOURCE_LANG], product["aisle_id"], product["department_id"],
+                                      product["labels"])
 
     for lang in TRANSLATED_LANGUAGES:
         word_dict = load_json(os.path.join(TRANSLATIONS_DIR, f"word_dict_{lang}.json"))
@@ -829,7 +833,7 @@ def main():
     # names.
     products_compact = [
         [p["id"], p["aisle_id"], p["department_id"], p["base_price"], p["order_count"], p["unit"],
-         p["size"], p["season"], p["reorder_count"], p["name"][SOURCE_LANG]]
+         p["size"], p["season"], p["reorder_count"], p["labels"], p["diets"], p["name"][SOURCE_LANG]]
         for p in products
     ]
     # Tax class of each aisle: food (reduced rate) or standard.
@@ -894,6 +898,8 @@ def main():
     for country, hours in COUNTRY_OPENING_HOURS.items():
         assert 0 <= hours[0] < hours[1] <= 24, country
     for lang in languages:
+        assert all(lang in names for names in LABEL_NAMES.values()), lang
+        assert all(lang in names for names in DIET_NAMES.values()), lang
         assert lang in STORE_NAME_TEMPLATES, lang
         assert all(lang in labels for labels in PROMOTION_LABELS.values()), lang
 
@@ -908,7 +914,7 @@ def main():
             "plus order statistics aggregated from orders.csv and order_products__prior.csv)",
             "product_count": len(products_compact),
             "product_fields": ["id", "aisle_id", "department_id", "base_price", "order_count", "unit",
-                               "size", "season", "reorder_count", f"name_{SOURCE_LANG}"],
+                               "size", "season", "reorder_count", "labels", "diets", f"name_{SOURCE_LANG}"],
             "name_files": {lang: f"names_{lang}.json.gz" for lang in TRANSLATED_LANGUAGES},
         },
         "departments": departments,
@@ -941,6 +947,12 @@ def main():
         "customer_reorder_rates": load_counts("customer_reorder_rates.csv", "reorder_pct", "customer_count"),
         "store_name_templates": STORE_NAME_TEMPLATES,
         "promotion_labels": PROMOTION_LABELS,
+        # Product `labels` / `diets` columns are bit masks over these keys.
+        "label_keys": LABELS,
+        "label_names": LABEL_NAMES,
+        "diet_keys": DIETS,
+        "diet_names": DIET_NAMES,
+        "diet_shares": DIET_SHARES,
         "products": products_compact,
     }
 

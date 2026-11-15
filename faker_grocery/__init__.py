@@ -4,7 +4,8 @@ Faker Grocery Store Provider
 A custom Faker provider for simulating a supermarket / hypermarket catalog:
 departments, aisles and products, plus helpers for prices, quantities, units,
 package sizes, barcodes, single grocery items, full randomized shopping
-lists, recurring customers and till receipts (VAT, promotions, payment).
+lists, recurring customers and till receipts (VAT, promotions, payment),
+product labels and diets, and daily sales time series.
 
 The catalog data comes from the Instacart Market Basket Analysis open
 dataset (21 departments, 134 aisles, ~49,700 real products). Department and
@@ -28,7 +29,7 @@ from typing import Any, NotRequired, TypedDict
 
 from faker.providers import BaseProvider
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 _DATA_PATH = os.path.join(_DATA_DIR, "grocery_data.json.gz")
@@ -62,6 +63,7 @@ class ProductRecord(TypedDict):
     size: str | None
     reference_price: float | None
     reference_unit: str | None
+    labels: list[str]
 
 
 class GroceryItem(TypedDict):
@@ -110,6 +112,7 @@ class CustomerProfile(TypedDict):
     favorite_product_ids: list[int]
     shopping_interval_days: int
     reorder_rate: float
+    diet: str | None
 
 
 class GroceryStore(TypedDict):
@@ -170,6 +173,28 @@ class Receipt(TypedDict):
     customer_id: NotRequired[int]
 
 
+class SalesRow(TypedDict):
+    """One day of sales, as returned by `GroceryStoreProvider.sales_series()`.
+
+    `baskets` is the store's number of baskets that day (repeated on every
+    row of the day); `items` and `revenue` are for the row's department /
+    aisle, or the whole store with `by="total"` (no department / aisle keys).
+    """
+
+    date: _datetime.date
+    baskets: int
+    department_id: NotRequired[int]
+    department: NotRequired[str]
+    aisle_id: NotRequired[int]
+    aisle: NotRequired[str]
+    items: int
+    revenue: float
+    currency: str
+
+
+SALES_GROUPINGS = ("total", "department", "aisle")
+
+
 def _load_data() -> dict[str, Any]:
     global _data_cache
     if _data_cache is None:
@@ -208,7 +233,7 @@ def _ensure_language(lang: str) -> None:
 def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     languages = raw["meta"]["languages"]
     # products rows are [id, aisle_id, department_id, base_price, order_count, unit, size, season,
-    # name_<lang0>, ...]
+    # reorder_count, labels, diets, name_<lang0>, ...] (see meta.product_fields)
     fields = raw["meta"]["product_fields"]
     base_price_col = fields.index("base_price")
     order_count_col = fields.index("order_count")
@@ -216,6 +241,8 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
     size_col = fields.index("size")
     season_col = fields.index("season")
     reorder_count_col = fields.index("reorder_count")
+    labels_col = fields.index("labels")
+    diets_col = fields.index("diets")
     # Only the source language is in the main file; the others are added by
     # _ensure_language() on first use.
     name_col = {lang: fields.index(f"name_{lang}") for lang in languages if f"name_{lang}" in fields}
@@ -250,6 +277,16 @@ def _build_index(raw: dict[str, Any]) -> dict[str, Any]:
         "size_col": size_col,
         "season_col": season_col,
         "reorder_count_col": reorder_count_col,
+        "labels_col": labels_col,
+        "diets_col": diets_col,
+        "label_keys": raw["label_keys"],
+        "label_names": raw["label_names"],
+        "diet_keys": raw["diet_keys"],
+        "diet_names": raw["diet_names"],
+        "diet_shares": raw["diet_shares"],
+        # Rows / cumulative weights matching label & diet filters, computed on
+        # first use per (scope, labels mask, diet bit).
+        "filtered": {},
         "departments": raw["departments"],
         "aisles": raw["aisles"],
         "price_ranges": raw["price_ranges"],
@@ -535,16 +572,102 @@ class GroceryStoreProvider(BaseProvider):
             cache[key] = list(itertools.accumulate(weight(row) for row in rows))
         return cache[key]
 
+    # -- labels / diets ---------------------------------------------------------
+
+    def _labels_mask(self, labels: str | list[str] | tuple[str, ...] | None) -> int:
+        if labels is None:
+            return 0
+        keys = self._data["label_keys"]
+        mask = 0
+        for label in [labels] if isinstance(labels, str) else labels:
+            if label not in keys:
+                raise ValueError(f"Unknown label: {label!r} (known: {', '.join(keys)})")
+            mask |= 1 << keys.index(label)
+        return mask
+
+    def _diet_bit(self, diet: str | None) -> int:
+        if diet is None:
+            return 0
+        keys = self._data["diet_keys"]
+        if diet not in keys:
+            raise ValueError(f"Unknown diet: {diet!r} (known: {', '.join(keys)})")
+        return 1 << keys.index(diet)
+
+    def _row_labels(self, row: list[Any]) -> list[str]:
+        mask = row[self._data["labels_col"]]
+        return [key for bit, key in enumerate(self._data["label_keys"]) if mask & (1 << bit)]
+
+    def grocery_labels(self) -> list[str]:
+        """Return the label keys products can carry: 'organic', 'gluten_free',
+        'vegan', 'lactose_free', 'sugar_free', 'low_fat', 'whole_grain',
+        'kosher', 'non_gmo'."""
+        return list(self._data["label_keys"])
+
+    def grocery_diets(self) -> list[str]:
+        """Return the diet keys: 'vegetarian', 'vegan', 'gluten_free', 'lactose_free'."""
+        return list(self._data["diet_keys"])
+
+    def grocery_label_name(self, label: str) -> str:
+        """Return the localized name of a label key ('gluten_free' -> 'sans gluten')."""
+        self._labels_mask(label)
+        return self._data["label_names"][label][self._lang]
+
+    def grocery_diet_name(self, diet: str) -> str:
+        """Return the localized name of a diet key ('vegetarian' -> 'végétarien')."""
+        self._diet_bit(diet)
+        return self._data["diet_names"][diet][self._lang]
+
+    def product_labels(self, product_id: int | str) -> list[str]:
+        """Return the label keys of a given product id (e.g. ['organic', 'gluten_free']).
+
+        Labels are what the product's name claims ("Organic", "Gluten
+        Free"...), plus a few implied ones (a vegan or plant-based milk is
+        lactose free)."""
+        return self._row_labels(self._find_product_row(product_id))
+
+    def product_fits_diet(self, product_id: int | str, diet: str) -> bool:
+        """True if a customer following `diet` may buy this product.
+
+        Approximate, from aisles and product names (meat and fish aisles and
+        names are excluded for vegetarians, bread / pasta / cereal need a
+        'gluten_free' label for gluten free...): fake data, never real
+        dietary or allergy information."""
+        return bool(self._find_product_row(product_id)[self._data["diets_col"]] & self._diet_bit(diet))
+
+    def _filtered_rows(
+        self, scope: Any, rows: list[list[Any]], cum_weights: list[int], label_mask: int, diet_bit: int
+    ) -> tuple[list[list[Any]], list[int]]:
+        """`rows` (and their cumulative popularity weights) restricted to
+        products carrying every label of `label_mask` and fitting the diet
+        of `diet_bit`; cached per (scope, label_mask, diet_bit)."""
+        if not label_mask and not diet_bit:
+            return rows, cum_weights
+        data = self._data
+        key = (scope, label_mask, diet_bit)
+        cache = data["filtered"]
+        if key not in cache:
+            labels_col, diets_col, order_col = data["labels_col"], data["diets_col"], data["order_count_col"]
+            kept = [
+                row for row in rows
+                if row[labels_col] & label_mask == label_mask and (not diet_bit or row[diets_col] & diet_bit)
+            ]
+            cache[key] = (kept, list(itertools.accumulate(row[order_col] + 1 for row in kept)))
+        return cache[key]
+
     def _pick_product_row(
         self,
         aisle: IdOrName | None = None,
         department: IdOrName | None = None,
         weighted: bool = True,
         month: int | None = None,
+        labels: str | list[str] | tuple[str, ...] | None = None,
+        diet: str | None = None,
     ) -> list[Any]:
         self._check_month(month)
         aisle_id = self._resolve_aisle_id(aisle)
         dept_id = self._resolve_department_id(department)
+        label_mask = self._labels_mask(labels)
+        diet_bit = self._diet_bit(diet)
 
         scope: Any
         if aisle_id is not None:
@@ -565,6 +688,12 @@ class GroceryStoreProvider(BaseProvider):
             rows = self._data["products"]
             cum_weights = self._data["cum_weights"]
             scope = "all"
+        if label_mask or diet_bit:
+            rows, cum_weights = self._filtered_rows(scope, rows, cum_weights, label_mask, diet_bit)
+            if not rows:
+                raise ValueError(f"No product matches labels={labels!r} and diet={diet!r} "
+                                 f"(aisle={aisle!r}, department={department!r})")
+            scope = (scope, label_mask, diet_bit)
 
         # random.choice(s) rather than random_element: the latter scans the
         # whole sequence on every call, which is slow on the ~50k-row catalog.
@@ -580,6 +709,8 @@ class GroceryStoreProvider(BaseProvider):
         department: IdOrName | None = None,
         weighted: bool = True,
         month: int | None = None,
+        labels: str | list[str] | None = None,
+        diet: str | None = None,
     ) -> str:
         """Return a random product name in the current language, optionally
         filtered by aisle and/or department (id or localized name).
@@ -589,8 +720,14 @@ class GroceryStoreProvider(BaseProvider):
         often than niche items); `weighted=False` picks uniformly. With a
         `month` (1-12), fresh fruits and vegetables in season come up more
         often and out-of-season ones less (strawberries in June, clementines
-        in December; shifted by six months in the southern hemisphere)."""
-        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month)
+        in December; shifted by six months in the southern hemisphere).
+
+        `labels` (a label key or a list of them, see `grocery_labels`)
+        restricts the pick to products carrying all of them ("organic",
+        ["vegan", "gluten_free"]); `diet` (see `grocery_diets`) to products
+        a customer following it may buy."""
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month,
+                                     labels=labels, diet=diet)
         return row[self._data["name_col"][self._lang]]
 
     def product_record(
@@ -599,6 +736,8 @@ class GroceryStoreProvider(BaseProvider):
         department: IdOrName | None = None,
         weighted: bool = True,
         month: int | None = None,
+        labels: str | list[str] | None = None,
+        diet: str | None = None,
     ) -> ProductRecord:
         """Return a full dict describing a random product: id, EAN-13
         barcode, localized product/aisle/department names and their ids, its
@@ -607,8 +746,10 @@ class GroceryStoreProvider(BaseProvider):
         one article, or one kg/L for products sold by weight/volume), its
         package 'size' ('500 g', '6 x 330 mL', or None) and the price per kg
         or L ('reference_price' / 'reference_unit', None when the size is a
-        count or unknown). `weighted` and `month` work as in `product`."""
-        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month)
+        count or unknown), and its 'labels' (see `product_labels`).
+        `weighted`, `month`, `labels` and `diet` work as in `product`."""
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month,
+                                     labels=labels, diet=diet)
         return self._row_to_record(row)
 
     def _row_to_record(self, row: list[Any]) -> ProductRecord:
@@ -634,6 +775,7 @@ class GroceryStoreProvider(BaseProvider):
             "size": self._size_label(size),
             "reference_price": reference_price,
             "reference_unit": reference_unit,
+            "labels": self._row_labels(row),
         }
 
     # -- package sizes / barcodes ---------------------------------------------
@@ -716,6 +858,7 @@ class GroceryStoreProvider(BaseProvider):
         self._currency = code
         self._price_factor = currency_info["rate"] * price_level
         self._decimals = currency_info["decimals"]
+        self._line_values: dict[int, float] | None = None  # sales_series() cache, per currency
 
     def grocery_currency(self, symbol: bool = False) -> str:
         """Return the currency prices are generated in: its ISO 4217 code
@@ -843,6 +986,8 @@ class GroceryStoreProvider(BaseProvider):
         family_size: int | None = None,
         weighted: bool = True,
         month: int | None = None,
+        labels: str | list[str] | None = None,
+        diet: str | None = None,
     ) -> GroceryItem:
         """Return a single random grocery list line item as a dict, with a
         unit price jittered +/-5% around the product's base price.
@@ -853,9 +998,10 @@ class GroceryStoreProvider(BaseProvider):
         counted (1, 2, 3... articles) and priced per article.
 
         `family_size` (if given) scales up the plausible quantity range
-        (bigger households buy more of a given item at once). `weighted`
-        and `month` work as in `product`."""
-        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month)
+        (bigger households buy more of a given item at once). `weighted`,
+        `month`, `labels` and `diet` work as in `product`."""
+        row = self._pick_product_row(aisle=aisle, department=department, weighted=weighted, month=month,
+                                     labels=labels, diet=diet)
         return self._item_from_row(row, family_size)
 
     def _item_from_row(self, row: list[Any], family_size: int | None) -> GroceryItem:
@@ -1000,6 +1146,7 @@ class GroceryStoreProvider(BaseProvider):
         coherent: bool,
         favorites: list[list[Any]] | None = None,
         reorder_rate: float = 0.0,
+        diet: str | None = None,
     ) -> list[GroceryItem]:
         """`item_count` items; with `coherent`, an item may pull in one from a
         complementary aisle (pasta -> pasta sauce); with `favorites`, each
@@ -1015,7 +1162,7 @@ class GroceryStoreProvider(BaseProvider):
             if favorites and rng.random() < reorder_rate:
                 row = rng.choices(favorites, cum_weights=favorite_weights)[0]
             else:
-                row = self._pick_product_row(department=dept_id, weighted=weighted, month=month)
+                row = self._pick_product_row(department=dept_id, weighted=weighted, month=month, diet=diet)
             items.append(self._item_from_row(row, family_size))
             if not coherent:
                 continue
@@ -1024,10 +1171,19 @@ class GroceryStoreProvider(BaseProvider):
                     break
                 if dept_id is not None and self.aisles[str(complement)]["department_id"] != dept_id:
                     continue
+                if diet is not None and not self._aisle_fits_diet(complement, diet):
+                    continue
                 if rng.random() < probability:
-                    extra = self._pick_product_row(aisle=complement, weighted=weighted, month=month)
+                    extra = self._pick_product_row(aisle=complement, weighted=weighted, month=month, diet=diet)
                     items.append(self._item_from_row(extra, family_size))
         return items
+
+    def _aisle_fits_diet(self, aisle_id: int, diet: str) -> bool:
+        """True if at least one product of the aisle fits `diet`."""
+        data = self._data
+        rows = data["by_aisle"][aisle_id]
+        return bool(self._filtered_rows(("aisle", aisle_id), rows, data["cum_weights_by_aisle"][aisle_id], 0,
+                                        self._diet_bit(diet))[0])
 
     def grocery_list(
         self,
@@ -1039,6 +1195,7 @@ class GroceryStoreProvider(BaseProvider):
         date: _datetime.date | None = None,
         weighted: bool = True,
         coherent: bool = True,
+        diet: str | None = None,
     ) -> GroceryList:
         """Return a randomized shopping basket as a dict with 'items',
         'item_count', 'family_size', 'total' and 'currency'.
@@ -1058,8 +1215,11 @@ class GroceryStoreProvider(BaseProvider):
         - `coherent` (default True) adds complementary products now and then
           (pasta and pasta sauce, cereal and milk, chips and dip...), within
           the item count.
+        - `diet` (see `grocery_diets`) keeps only products a customer
+          following it may buy.
         """
         _check_family_size(family_size)
+        self._diet_bit(diet)
         item_count = self._item_count(family_size, min_items, max_items)
 
         # Resolve once (and fail fast on an unknown department) rather than
@@ -1069,7 +1229,7 @@ class GroceryStoreProvider(BaseProvider):
             self.shopping_datetime(date=date, weighted=weighted) if with_datetime or date is not None else None
         )
         month = shopping_dt.month if shopping_dt is not None else None
-        items = self._basket_items(item_count, family_size, dept_id, weighted, month, coherent)
+        items = self._basket_items(item_count, family_size, dept_id, weighted, month, coherent, diet=diet)
         result: GroceryList = {
             "items": items,
             "item_count": item_count,
@@ -1083,7 +1243,7 @@ class GroceryStoreProvider(BaseProvider):
 
     # -- customers --------------------------------------------------------------
 
-    def customer_profile(self, family_size: int | None = None) -> CustomerProfile:
+    def customer_profile(self, family_size: int | None = None, diet: str | None = None) -> CustomerProfile:
         """Return a recurring customer: id, name, household size, favorite
         products, how often they shop (in days) and the share of their
         basket that is re-orders of their favorites.
@@ -1093,20 +1253,32 @@ class GroceryStoreProvider(BaseProvider):
         and monthly most common), the re-order share the distribution of
         their re-ordered items (~45% on average), and favorites are picked
         in proportion to how often products are re-ordered (milk, bananas
-        and eggs rather than one-off purchases)."""
+        and eggs rather than one-off purchases).
+
+        `diet` (see `grocery_diets`) makes a customer following that diet:
+        favorites and baskets (`customer_history`) only hold products fitting
+        it. `diet="random"` draws one for a few customers (about 5%
+        vegetarian, 2% vegan, 2% gluten free, 4% lactose free), none for the
+        others."""
         rng = self.generator.random
         if family_size is None:
             family_size = rng.choices([1, 2, 3, 4, 5], weights=[30, 35, 15, 15, 5])[0]
         _check_family_size(family_size)
         data = self._data
-        if "reorder_cum_weights" not in data:
-            data["reorder_cum_weights"] = list(
-                itertools.accumulate(row[data["reorder_count_col"]] + 1 for row in data["products"])
-            )
+        if diet == "random":
+            shares = data["diet_shares"]
+            keys = [*shares, None]
+            diet = rng.choices(keys, weights=[*shares.values(), 1 - sum(shares.values())])[0]
+        diet_bit = self._diet_bit(diet)
+        cache_key = f"reorder_cum_weights_{diet_bit}"
+        if cache_key not in data:
+            rows = [row for row in data["products"] if not diet_bit or row[data["diets_col"]] & diet_bit]
+            data[cache_key] = (rows, list(itertools.accumulate(row[data["reorder_count_col"]] + 1 for row in rows)))
+        candidates, reorder_weights = data[cache_key]
         favorites: list[int] = []
         target = 8 + 4 * family_size
         for _ in range(target * 10):
-            product_id = rng.choices(data["products"], cum_weights=data["reorder_cum_weights"])[0][0]
+            product_id = rng.choices(candidates, cum_weights=reorder_weights)[0][0]
             if product_id not in favorites:
                 favorites.append(product_id)
             if len(favorites) == target:
@@ -1122,6 +1294,7 @@ class GroceryStoreProvider(BaseProvider):
             "favorite_product_ids": favorites,
             "shopping_interval_days": max(1, interval),
             "reorder_rate": round(reorder_rate, 2),
+            "diet": diet,
         }
 
     def customer_history(
@@ -1136,8 +1309,9 @@ class GroceryStoreProvider(BaseProvider):
         `customer_profile()` unless given), oldest first, spaced by their
         shopping interval (give or take a third) and ending on `end_date`
         (default: today). Each basket re-orders the customer's favorite
-        products with probability `reorder_rate` per item, and carries
-        'shopping_datetime' and 'customer_id'."""
+        products with probability `reorder_rate` per item, sticks to the
+        customer's diet if any, and carries 'shopping_datetime' and
+        'customer_id'."""
         if isinstance(trips, bool) or not isinstance(trips, int) or trips < 1:
             raise ValueError(f"trips must be a positive integer, got {trips!r}")
         if customer is None:
@@ -1159,7 +1333,7 @@ class GroceryStoreProvider(BaseProvider):
             item_count = self._item_count(family_size, None, None)
             items = self._basket_items(
                 item_count, family_size, None, weighted, shopping_dt.month, coherent,
-                favorites=favorites, reorder_rate=customer["reorder_rate"],
+                favorites=favorites, reorder_rate=customer["reorder_rate"], diet=customer.get("diet"),
             )
             baskets.append({
                 "items": items,
@@ -1171,6 +1345,163 @@ class GroceryStoreProvider(BaseProvider):
                 "customer_id": customer["customer_id"],
             })
         return baskets
+
+    # -- sales time series --------------------------------------------------------
+
+    def _aisle_line_values(self) -> dict[int, float]:
+        """Average amount of a basket line per aisle, in the current
+        currency: popularity-weighted over the aisle's products, with the
+        mean quantity a couple buys (as in `grocery_list()`'s default)."""
+        if self._line_values is None:
+            data = self._data
+            base_col, order_col, unit_col = data["base_price_col"], data["order_count_col"], data["unit_col"]
+            mean_count = (1 + self._max_quantity_for_family(2)) / 2
+            values: dict[int, float] = {}
+            for aisle_id, rows in data["by_aisle"].items():
+                total = weight_sum = 0.0
+                for row in rows:
+                    measure = data["measured_units"].get(row[unit_col])
+                    if measure is None:
+                        quantity = mean_count
+                    else:
+                        maximum = measure["base"] + measure["per_person"] * 2
+                        quantity = (measure["min"] + maximum) / 2 * measure["factor"]
+                    weight = row[order_col] + 1
+                    total += weight * self._convert_price(row[base_col]) * quantity
+                    weight_sum += weight
+                values[aisle_id] = total / weight_sum
+            self._line_values = values
+        return self._line_values
+
+    def _aisle_shares(self, month: int) -> dict[int, float]:
+        """Share of the items sold in each aisle for `month`: popularity,
+        with fresh produce in / out of season (as in `product(month=...)`)."""
+        data = self._data
+        if self._country in data["southern_hemisphere_countries"]:
+            month = (month + 5) % 12 + 1
+        key = ("aisle_shares", month)
+        cache = data["seasonal_cum_weights"]
+        if key not in cache:
+            bit = 1 << (month - 1)
+            order_col, season_col = data["order_count_col"], data["season_col"]
+            boost, penalty = data["seasonal_factors"]["in"], data["seasonal_factors"]["out"]
+            weights = {
+                aisle_id: sum(
+                    (row[order_col] + 1) * (1 if not row[season_col] else boost if row[season_col] & bit else penalty)
+                    for row in rows
+                )
+                for aisle_id, rows in data["by_aisle"].items()
+            }
+            total = sum(weights.values())
+            cache[key] = {aisle_id: weight / total for aisle_id, weight in weights.items()}
+        return cache[key]
+
+    def sales_series(
+        self,
+        start: _datetime.date | None = None,
+        end: _datetime.date | None = None,
+        by: str = "department",
+        baskets_per_day: int = 1000,
+        noise: float = 0.1,
+    ) -> list[SalesRow]:
+        """Return the daily sales of a store from `start` to `end` (both
+        included; default: the 30 days up to today), one row per day and
+        department (`by="department"`, the default), per day and aisle
+        (`by="aisle"`) or per day (`by="total"`): number of baskets, items
+        sold and revenue.
+
+        Built from the same measured data as the baskets:
+        - traffic follows the locale's weekly shopping pattern (see
+          `set_grocery_shopping_pattern`) around `baskets_per_day` on an
+          average day: busier weekends, nothing on days shops are closed
+          (Sundays in Germany);
+        - items per basket follow the Instacart basket sizes (~10 on average);
+        - the mix of aisles follows product popularity, with fresh produce
+          in and out of season month by month;
+        - revenue uses the catalog prices in the locale's currency.
+        `noise` (default 0.1) is the day-to-day variation of traffic (a
+        log-normal factor), on top of count noise; 0 gives smooth series.
+        There is no trend, holiday or promotion effect."""
+        if by not in SALES_GROUPINGS:
+            raise ValueError(f"by must be one of {', '.join(SALES_GROUPINGS)}, got {by!r}")
+        if isinstance(baskets_per_day, bool) or not isinstance(baskets_per_day, int) or baskets_per_day < 0:
+            raise ValueError(f"baskets_per_day must be a non-negative integer, got {baskets_per_day!r}")
+        if isinstance(noise, bool) or not isinstance(noise, int | float) or not 0 <= noise <= 1:
+            raise ValueError(f"noise must be between 0 and 1, got {noise!r}")
+        if isinstance(end, _datetime.datetime):
+            end = end.date()
+        if isinstance(start, _datetime.datetime):
+            start = start.date()
+        end = end if end is not None else _datetime.date.today()
+        start = start if start is not None else end - _datetime.timedelta(days=29)
+        if start > end:
+            raise ValueError(f"start ({start}) must not be after end ({end})")
+
+        rng = self.generator.random
+        data = self._data
+        open_hour, close_hour = self.grocery_opening_hours()
+        pattern = data["shopping_patterns"][self._shopping_pattern]
+        day_weights = [sum(hours[open_hour:close_hour]) for hours in pattern]
+        mean_weight = sum(day_weights) / 7
+        day_factors = [weight / mean_weight if mean_weight else 1.0 for weight in day_weights]
+        sizes = data["basket_sizes"]
+        items_per_basket = sum(size * count for size, count in sizes) / sum(count for _, count in sizes)
+        line_values = self._aisle_line_values()
+        aisle_ids = sorted(data["by_aisle"])
+
+        def count(mean: float) -> int:
+            # Poisson-like count noise (normal approximation).
+            return max(0, round(rng.gauss(mean, math.sqrt(mean)))) if mean > 0 else 0
+
+        rows: list[SalesRow] = []
+        day = start
+        while day <= end:
+            mean_baskets = baskets_per_day * day_factors[day.weekday()]
+            if noise and mean_baskets:
+                mean_baskets *= math.exp(rng.gauss(0, noise) - noise**2 / 2)
+            baskets = count(mean_baskets)
+            shares = self._aisle_shares(day.month)
+            sold: dict[int, tuple[int, float]] = {}
+            for aisle_id in aisle_ids:
+                items = count(baskets * items_per_basket * shares[aisle_id])
+                revenue = items * line_values[aisle_id] * (math.exp(rng.gauss(0, 0.05)) if items else 0)
+                sold[aisle_id] = (items, revenue)
+            rows.extend(self._sales_rows(day, baskets, sold, by))
+            day += _datetime.timedelta(days=1)
+        return rows
+
+    def _sales_rows(self, day: _datetime.date, baskets: int, sold: dict[int, tuple[int, float]],
+                    by: str) -> list[SalesRow]:
+        if by == "total":
+            return [{
+                "date": day, "baskets": baskets, "items": sum(items for items, _ in sold.values()),
+                "revenue": self._round_price(sum(revenue for _, revenue in sold.values())),
+                "currency": self._currency,
+            }]
+        if by == "aisle":
+            rows: list[SalesRow] = []
+            for aisle_id, (items, revenue) in sold.items():
+                department_id = self.aisles[str(aisle_id)]["department_id"]
+                rows.append({
+                    "date": day, "baskets": baskets,
+                    "department_id": department_id, "department": self.departments[str(department_id)][self._lang],
+                    "aisle_id": aisle_id, "aisle": self.aisles[str(aisle_id)][self._lang],
+                    "items": items, "revenue": self._round_price(revenue), "currency": self._currency,
+                })
+            return rows
+        by_department: dict[int, list[float]] = {}
+        for aisle_id, (items, revenue) in sold.items():
+            totals = by_department.setdefault(self.aisles[str(aisle_id)]["department_id"], [0, 0.0])
+            totals[0] += items
+            totals[1] += revenue
+        return [
+            {
+                "date": day, "baskets": baskets,
+                "department_id": department_id, "department": self.departments[str(department_id)][self._lang],
+                "items": int(items), "revenue": self._round_price(revenue), "currency": self._currency,
+            }
+            for department_id, (items, revenue) in sorted(by_department.items())
+        ]
 
     # -- stores / receipts ------------------------------------------------------
 

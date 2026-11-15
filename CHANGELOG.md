@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-15
+
+### Added
+- **Product labels**: `product_record()` gained `labels` (`['organic', 'gluten_free']`, often `[]`), read from the product name ("Organic", "Gluten Free", "Low Fat", "Whole Wheat"...) plus implied ones (vegan products and plant-based milks are lactose free): 9 labels, 5,004 organic products, ~980 low fat, ~850 lactose free, ~810 gluten free... `product()`, `product_record()` and `grocery_item()` take `labels=` (a key or a list, all required). New `product_labels(product_id)`, `grocery_labels()`, `grocery_label_name(label)` (localized: "sans gluten", "Vollkorn").
+- **Diets**: `vegetarian`, `vegan`, `gluten_free`, `lactose_free`, from aisles and product names (meat and fish aisles and names excluded for vegetarians wherever shelved; bread, pasta, beer, noodles... need a gluten free label; dairy needs a lactose free one...). `product()`, `product_record()`, `grocery_item()` and `grocery_list()` take `diet=`; `customer_profile(diet=...)` makes a customer whose favorites and `customer_history()` baskets fit it, `diet="random"` gives one to ~13% of customers; `CustomerProfile` gained `diet`. New `product_fits_diet()`, `grocery_diets()`, `grocery_diet_name()`. Approximate rules, documented as fake data, not dietary information.
+- **Sales time series**: `sales_series(start, end, by="department"|"aisle"|"total", baskets_per_day=1000, noise=0.1)` returns daily baskets, items and revenue: traffic following the locale's weekly shopping pattern (closed days included), Instacart basket sizes, the aisle mix by popularity and season, catalog prices in the locale's currency. New `SalesRow` `TypedDict`, `SALES_GROUPINGS`.
+- **pandas and Parquet**: new `faker_grocery.export` module with `to_dataframe(kind, count, locale, seed, ...)` (flat rows, or `flat=False` for one row per record) and `export_parquet(...)`; new optional dependencies `pip install "faker-grocery[data]"` (pandas, pyarrow), not needed by the rest of the package.
+- Command line: `faker-grocery export sales` (`-n` days, `--start`, `--by`, `--baskets-per-day`), `--format parquet` (with `-o`), `--diet` for baskets, receipts, customers and products (`random` for customers). In CSV, labels are written `organic|gluten_free`.
+- 28 new tests (`tests/test_labels_sales.py`, label / diet rules in `tests/test_build_data.py`, `SalesRow` in `tests/test_typing.py`); a CI job without pandas / pyarrow.
+
+### Changed
+- `grocery_data.json.gz`: products rows gained `labels` and `diets` bit-mask columns (before `name_en`); new tables `label_keys`, `label_names`, `diet_keys`, `diet_names`, `diet_shares` (internal format, see Stability and versioning).
+- The export code moved from `faker_grocery.__main__` to `faker_grocery.export` (the command line is unchanged).
+- Values generated for a given seed are unchanged without the new options (records only gain the `labels` / `diet` fields).
+
 ## [0.12.1] - 2026-11-15
 
 ### Fixed
