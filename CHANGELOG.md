@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-15
+
 ### Added
 - `faker-grocery --locale fr_FR` (or `-l fr_FR`, `python -m faker_grocery --local fr_FR`) runs the demo for that locale, without the `demo` subcommand; repeatable.
 - `faker-grocery export --csv-safe`: prefixes text cells starting with `=`, `+`, `-`, `@` (or a tab / carriage return) with `'` against spreadsheet formula injection. Off by default, since it also changes promotion labels such as `-30 %`.
