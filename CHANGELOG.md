@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `grocery_departments()` and `grocery_aisles(department=None)` list the catalog structure, named in the current language: `[{'id': 1, 'name': 'surgelés'}, ...]` and `[{'id': 1, 'name': 'soupes et salades préparées', 'department_id': 20, 'department': 'traiteur'}, ...]`, the aisles optionally of one department (id or localized name). New `DepartmentInfo` and `AisleInfo` `TypedDict`s. Until now, listing them meant reading the internal data files.
+- `playground/app.py`: a local web page to try the provider methods and build datasets, with JSON results and the equivalent Python code / command line (standard library only, not part of the installed package).
+
 ## [0.13.0] - 2026-11-15
 
 ### Added

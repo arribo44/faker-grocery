@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Faker Grocery Playground</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #5d6577;
+    --border: #d9dde5; --accent: #2b8a4b; --accent-text: #ffffff;
+    --code-bg: #0f1420; --code-text: #d7e0f0; --error: #c0392b; --stripe: #f1f3f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151c; --panel: #1a1f29; --text: #e3e7ef; --muted: #98a1b3;
+      --border: #2c3443; --accent: #5cc683; --accent-text: #0d1120;
+      --code-bg: #0b0e15; --code-text: #d7e0f0; --error: #ff7a6b; --stripe: #1f2531;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: -1px; }
+  .tabs button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; background: transparent; }
+  .tabs button[aria-selected=true] { background: var(--panel); border-bottom-color: var(--panel); font-weight: 600; }
+  form { background: var(--panel); border: 1px solid var(--border); border-radius: 0 10px 10px 10px;
+         padding: 16px; display: grid; gap: 16px; }
+  form[hidden], section[hidden], .hide { display: none !important; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: end; }
+  label.field { display: grid; gap: 4px; font-weight: 600; font-size: 13px; }
+  label.check { display: flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+  select, input[type=number], input[type=search], input[type=date], input[type=text] {
+    font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); min-width: 110px; max-width: 100%; }
+  input[type=number] { width: 120px; }
+  fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 0; padding: 10px 12px; min-width: 0; }
+  legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .methods { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+             gap: 4px 16px; max-height: 300px; overflow: auto; }
+  .methods label { display: flex; gap: 6px; align-items: baseline; font-family: ui-monospace, monospace;
+                   font-size: 13px; cursor: pointer; }
+  .methods label.required::after { content: "🔑"; font-size: 11px; }
+  .methods label small { color: var(--muted); font-family: system-ui, sans-serif; font-size: 11px; }
+  .labels { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0; }
+  button { font: inherit; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+           border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .status { color: var(--muted); font-size: 13px; }
+  .status.error { color: var(--error); }
+  section.output { margin-top: 20px; }
+  .out-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; margin: 14px 0 6px; gap: 8px; }
+  .out-head h2 { font-size: 16px; margin: 0; }
+  .out-head .tools { margin: 0; }
+  pre { margin: 0; background: var(--code-bg); color: var(--code-text); border-radius: 10px;
+        padding: 14px; min-height: 240px; max-height: 70vh; overflow: auto;
+        font: 12.5px/1.5 ui-monospace, "SFMono-Regular", Menlo, monospace; white-space: pre; }
+  pre.code { min-height: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stat { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; min-width: 120px; }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .table-wrap { overflow: auto; max-height: 50vh; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+  table { border-collapse: collapse; font-size: 12.5px; width: max-content; min-width: 100%; }
+  th, td { padding: 5px 8px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap;
+           max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+  tr:nth-child(even) td { background: var(--stripe); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Faker Grocery Playground</h1>
+  <p class="sub">Essaie les méthodes de <code>GroceryStoreProvider</code> enregistrement par enregistrement,
+    ou génère un jeu de données (paniers, tickets, clients, produits, ventes journalières).</p>
+
+  <div class="panel row">
+    <label class="field">Locale <select id="locale"></select></label>
+    <label class="field">Devise <select id="currency"></select></label>
+    <label class="field">Profil d'affluence <select id="pattern"></select></label>
+    <label class="field">Graine (optionnelle) <input id="seed" type="number" placeholder="aléatoire"></label>
+    <span class="status" id="locale-info"></span>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="methods-form" aria-selected="true">Méthodes</button>
+    <button type="button" role="tab" data-tab="dataset-form" aria-selected="false">Jeu de données</button>
+  </div>
+
+  <form id="methods-form">
+    <div class="row">
+      <label class="field">Nombre d'enregistrements <input id="count" type="number" min="1" value="5"></label>
+      <button class="primary" type="submit">Générer</button>
+      <span class="status"></span>
+    </div>
+
+    <fieldset>
+      <legend>Méthodes</legend>
+      <div class="tools">
+        <input id="filter" type="search" placeholder="Filtrer…">
+        <button type="button" id="all">Tout cocher</button>
+        <button type="button" id="none">Tout décocher</button>
+      </div>
+      <div class="methods" id="methods"></div>
+      <p class="hint">Sous chaque méthode : les options qu'elle prend. 🔑 : la méthode a besoin d'un champ
+        (identifiant produit, rayon, sous-rayon, régime ou label : le premier coché).</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Options (passées aux méthodes qui les acceptent)</legend>
+      <div class="row">
+        <label class="field">Rayon <select id="department"><option value="">tous</option></select></label>
+        <label class="field">Sous-rayon <select id="aisle"><option value="">tous</option></select></label>
+        <label class="field">Régime <select class="diet"><option value="">aucun</option></select></label>
+        <label class="field">Mois <select id="month"><option value="">mois courant</option></select></label>
+        <label class="field">Taille du foyer <input id="family-size" type="number" min="1" max="10" placeholder="aléatoire"></label>
+        <label class="field">Courses (historique) <input id="trips" type="number" min="1" value="10"></label>
+        <label class="field">Identifiant produit <input id="product-id" type="number" min="1" placeholder="ex. 24852"></label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label class="check"><input type="checkbox" id="weighted" checked> pondéré par popularité</label>
+        <label class="check"><input type="checkbox" id="coherent" checked> paniers cohérents</label>
+        <label class="check"><input type="checkbox" id="with-datetime"> panier daté</label>
+      </div>
+      <p class="hint" style="margin-top:12px">Labels (tous requis) :</p>
+      <div class="labels" id="labels"></div>
+    </fieldset>
+  </form>
+
+  <form id="dataset-form" hidden>
+    <div class="row">
+      <label class="field">Type <select id="kind"></select></label>
+      <label class="field"><span id="ds-count-label">Nombre</span> <input id="ds-count" type="number" min="1" value="100"></label>
+      <label class="field" data-for="baskets receipts customers products">Régime <select class="diet"><option value="">aucun</option></select></label>
+      <label class="field" data-for="customers">Courses par client <input id="ds-trips" type="number" min="1" value="10"></label>
+      <label class="field" data-for="sales">Premier jour <input id="start" type="date"></label>
+      <label class="field" data-for="sales">Regroupement <select id="by"></select></label>
+      <label class="field" data-for="sales">Paniers par jour <input id="baskets-per-day" type="number" min="1" value="1000"></label>
+      <button class="primary" type="submit">Générer</button>
+      <span class="status"></span>
+    </div>
+    <p class="hint">Mêmes données que <code>faker-grocery export</code>. Ventes : premier jour vide = 1er janvier de l'année en cours ;
+      « Nombre » = nombre de jours.</p>
+  </form>
+
+  <section class="output" id="methods-output">
+    <div class="out-head">
+      <h2>Résultat JSON</h2>
+      <div class="tools">
+        <button type="button" data-copy="output">Copier</button>
+        <button type="button" id="download-methods">Télécharger .json</button>
+      </div>
+    </div>
+    <pre id="output">// Le résultat s'affichera ici.</pre>
+    <div class="out-head">
+      <h2>Code Python équivalent</h2>
+      <button type="button" data-copy="methods-code">Copier</button>
+    </div>
+    <pre id="methods-code" class="code"># Le code s'affichera ici.</pre>
+  </section>
+
+  <section class="output" id="dataset-output" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="out-head">
+      <h2>Résultat JSON <span class="status" id="json-note"></span></h2>
+      <div class="tools">
+        <button type="button" data-copy="ds-json">Copier</button>
+        <button type="button" data-download="json">.json</button>
+        <button type="button" data-download="jsonl">.jsonl</button>
+        <button type="button" data-download="csv">.csv</button>
+      </div>
+    </div>
+    <pre id="ds-json"></pre>
+    <div class="out-head">
+      <h2>Lignes à plat <span class="status" id="rows-note"></span></h2>
+    </div>
+    <div class="table-wrap" id="rows-table"></div>
+    <div class="out-head">
+      <h2>Code équivalent</h2>
+      <button type="button" data-copy="dataset-code">Copier</button>
+    </div>
+    <pre id="dataset-code" class="code"></pre>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DEFAULTS = ["product", "price", "unit"];
+const PREVIEW_ROWS = 200;
+const PREVIEW_RECORDS = 50;
+const MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+const KINDS = { baskets: "paniers", receipts: "tickets de caisse", customers: "clients", products: "produits", sales: "ventes journalières" };
+const GROUPINGS = { department: "par rayon", aisle: "par sous-rayon", total: "total" };
+let localeData = null;
+let methodInfo = {};
+let methodsResult = null;
+let dataset = null;
+
+const option = (value, label) => new Option(label, value);
+
+async function getJson(url) {
+  const response = await fetch(url);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error);
+  return data;
+}
+
+async function init() {
+  const options = await getJson("/api/options");
+  $("count").max = options.max_count;
+  $("ds-count").max = options.max_dataset;
+  for (const [label, locales] of options.locale_groups) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const locale of locales) group.append(option(locale, locale));
+    $("locale").append(group);
+  }
+  $("locale").value = "fr_FR";
+  for (const code of options.currencies) $("currency").append(option(code, code));
+  for (const name of options.patterns) $("pattern").append(option(name, name));
+  MONTHS.forEach((name, i) => $("month").append(option(i + 1, name)));
+  for (const kind of options.kinds) $("kind").append(option(kind, KINDS[kind] || kind));
+  for (const by of options.groupings) $("by").append(option(by, GROUPINGS[by] || by));
+  $("by").value = "department";
+  methodInfo = options.methods;
+  for (const [name, info] of Object.entries(options.methods)) {
+    const label = document.createElement("label");
+    label.title = info.doc;
+    label.dataset.name = name;
+    if (info.required.length) label.className = "required";
+    const extra = [...info.required, ...info.options];
+    label.innerHTML = `<input type="checkbox" value="${name}"${DEFAULTS.includes(name) ? " checked" : ""}>
+      <span>${name}${extra.length ? `<br><small>${extra.join(", ")}</small>` : ""}</span>`;
+    $("methods").append(label);
+  }
+  updateKind();
+  await loadLocale();
+}
+
+async function loadLocale() {
+  const locale = $("locale").value;
+  localeData = await getJson(`/api/locale?locale=${encodeURIComponent(locale)}`);
+  $("currency").options[0]?.dataset.auto && $("currency").remove(0);
+  $("currency").prepend(Object.assign(option("", `${localeData.currency} (locale)`), { selected: true }));
+  $("currency").options[0].dataset.auto = "1";
+  $("pattern").options[0]?.dataset.auto && $("pattern").remove(0);
+  $("pattern").prepend(Object.assign(option("", `${localeData.pattern} (locale)`), { selected: true }));
+  $("pattern").options[0].dataset.auto = "1";
+  $("locale-info").textContent = `Catalogue en « ${localeData.language} »`;
+
+  const department = $("department");
+  department.length = 1;
+  for (const d of localeData.departments) department.append(option(d.id, `${d.name} (${d.id})`));
+  fillAisles();
+
+  for (const select of document.querySelectorAll("select.diet")) {
+    const current = select.value;
+    select.length = 1;
+    for (const [key, name] of Object.entries(localeData.diets)) select.append(option(key, name));
+    select.value = current;
+  }
+  const checked = new Set([...$("labels").querySelectorAll("input:checked")].map((b) => b.value));
+  $("labels").replaceChildren();
+  for (const [key, name] of Object.entries(localeData.labels)) {
+    const label = document.createElement("label");
+    label.className = "check";
+    label.innerHTML = `<input type="checkbox" value="${key}"${checked.has(key) ? " checked" : ""}> ${name}`;
+    $("labels").append(label);
+  }
+}
+
+function fillAisles() {
+  const dep = $("department").value;
+  const aisle = $("aisle");
+  const current = aisle.value;
+  aisle.length = 1;
+  for (const a of localeData.aisles) {
+    if (!dep || String(a.department_id) === dep) aisle.append(option(a.id, `${a.name} (${a.id})`));
+  }
+  aisle.value = [...aisle.options].some((o) => o.value === current) ? current : "";
+}
+
+$("locale").addEventListener("change", () => loadLocale().catch((err) => ($("locale-info").textContent = err.message)));
+$("department").addEventListener("change", fillAisles);
+
+for (const tab of document.querySelectorAll("[role=tab]")) {
+  tab.onclick = () => {
+    for (const other of document.querySelectorAll("[role=tab]")) {
+      const selected = other === tab;
+      other.setAttribute("aria-selected", selected);
+      $(other.dataset.tab).hidden = !selected;
+    }
+    const isDataset = tab.dataset.tab === "dataset-form";
+    $("methods-output").hidden = isDataset;
+    $("dataset-output").hidden = !isDataset || !dataset;
+  };
+}
+
+function updateKind() {
+  const kind = $("kind").value;
+  for (const field of document.querySelectorAll("[data-for]")) {
+    field.classList.toggle("hide", !field.dataset.for.split(" ").includes(kind));
+  }
+  $("ds-count-label").textContent = kind === "sales" ? "Nombre de jours" : `Nombre de ${KINDS[kind]}`;
+}
+$("kind").addEventListener("change", updateKind);
+
+function visibleBoxes() {
+  return [...$("methods").querySelectorAll("label")].filter((l) => l.style.display !== "none")
+    .map((l) => l.querySelector("input"));
+}
+$("filter").addEventListener("input", (e) => {
+  const q = e.target.value.toLowerCase();
+  for (const label of $("methods").children) label.style.display = label.dataset.name.includes(q) ? "" : "none";
+});
+$("all").onclick = () => visibleBoxes().forEach((b) => (b.checked = true));
+$("none").onclick = () => visibleBoxes().forEach((b) => (b.checked = false));
+for (const button of document.querySelectorAll("[data-copy]")) {
+  button.onclick = () => navigator.clipboard.writeText($(button.dataset.copy).textContent);
+}
+
+function common() {
+  return { locale: $("locale").value, seed: $("seed").value, currency: $("currency").value, pattern: $("pattern").value };
+}
+
+async function post(form, url, body, onData) {
+  const status = form.querySelector(".status");
+  const button = form.querySelector("button[type=submit]");
+  status.className = "status";
+  button.disabled = true;
+  status.textContent = "Génération…";
+  const started = performance.now();
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...common(), ...body }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error);
+    status.textContent = `${onData(data)} en ${Math.round(performance.now() - started)} ms`;
+  } catch (err) {
+    status.className = "status error";
+    status.textContent = err.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("methods-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const methods = [...$("methods").querySelectorAll("input:checked")].map((b) => b.value);
+  if (!methods.length) {
+    const status = e.target.querySelector(".status");
+    status.className = "status error";
+    status.textContent = "Coche au moins une méthode.";
+    return;
+  }
+  const body = {
+    methods, count: Number($("count").value),
+    department: $("department").value, aisle: $("aisle").value,
+    diet: e.target.querySelector(".diet").value, month: $("month").value,
+    family_size: $("family-size").value, trips: $("trips").value, product_id: $("product-id").value,
+    labels: [...$("labels").querySelectorAll("input:checked")].map((b) => b.value),
+    weighted: $("weighted").checked, coherent: $("coherent").checked, with_datetime: $("with-datetime").checked,
+  };
+  const code = methodsCode({ ...common(), ...body });
+  post(e.target, "/api/generate", body, (data) => {
+    methodsResult = data;
+    $("methods-code").textContent = code;
+    $("output").textContent = JSON.stringify(data, null, 2);
+    return `${data.length} enregistrement(s)`;
+  });
+});
+
+$("dataset-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const body = {
+    kind: $("kind").value, count: Number($("ds-count").value), diet: e.target.querySelector(".diet").value,
+    trips: $("ds-trips").value, start: $("start").value, by: $("by").value,
+    baskets_per_day: $("baskets-per-day").value,
+  };
+  const code = datasetCode({ ...common(), ...body });
+  post(e.target, "/api/dataset", body, (data) => {
+    dataset = { ...data, kind: body.kind };
+    $("dataset-code").textContent = code;
+    showDataset(dataset);
+    return `${data.records.length} enregistrement(s), ${data.rows.length} ligne(s)`;
+  });
+});
+
+function showDataset(data) {
+  const { records, rows } = data;
+  const sum = (key) => rows.reduce((total, row) => total + (Number(row[key]) || 0), 0);
+  const stats = [[records.length, "enregistrements (JSON)"], [rows.length, "lignes à plat (CSV)"]];
+  if (rows.length && "revenue" in rows[0]) stats.push([sum("revenue").toLocaleString("fr-FR", { maximumFractionDigits: 0 }), "chiffre d'affaires"]);
+  if (rows.length && "line_total" in rows[0]) stats.push([sum("line_total").toLocaleString("fr-FR", { maximumFractionDigits: 0 }), "total des lignes"]);
+  $("stats").innerHTML = stats.map(([value, label]) => `<div class="stat"><b>${value}</b><span>${label}</span></div>`).join("");
+  const shown = records.slice(0, PREVIEW_RECORDS);
+  $("ds-json").textContent = JSON.stringify(shown, null, 2);
+  $("json-note").textContent = records.length > PREVIEW_RECORDS
+    ? `(${PREVIEW_RECORDS} premiers sur ${records.length} ; le téléchargement contient tout)` : `(${records.length})`;
+  table($("rows-table"), rows);
+  $("rows-note").textContent = rows.length > PREVIEW_ROWS ? `(${PREVIEW_ROWS} premières sur ${rows.length})` : `(${rows.length})`;
+  $("dataset-output").hidden = false;
+}
+
+// ---- Equivalent code ------------------------------------------------------
+
+const FIELD_NAMES = { product_id: "Identifiant produit", aisle: "Sous-rayon", department: "Rayon", diet: "Régime", labels: "Labels" };
+const REQUIRED_SOURCES = { product_id: "product_id", aisle_id: "aisle", department_id: "department", diet: "diet", label: "labels" };
+
+function py(value) {
+  if (value === true) return "True";
+  if (value === false) return "False";
+  if (value === null || value === undefined) return "None";
+  if (Array.isArray(value)) return `[${value.map(py).join(", ")}]`;
+  return typeof value === "number" ? String(value) : JSON.stringify(value);
+}
+
+function header(q, lines) {
+  const out = ["from faker import Faker", "from faker_grocery import GroceryStoreProvider", "",
+    `fake = Faker(${py(q.locale)})`, "fake.add_provider(GroceryStoreProvider)"];
+  if (q.seed !== "") out.push(`fake.seed_instance(${Number(q.seed)})`);
+  if (q.currency) out.push(`fake.set_grocery_currency(${py(q.currency)})`);
+  if (q.pattern) out.push(`fake.set_grocery_shopping_pattern(${py(q.pattern)})`);
+  return [...out, "", ...lines].join("\n") + "\n";
+}
+
+// The options the server passes (read_options / call in app.py), default values left out.
+function methodOptions(q) {
+  const options = {};
+  for (const key of ["department", "aisle", "month", "family_size", "trips", "product_id"]) {
+    if (q[key] !== "" && q[key] !== undefined) options[key] = Number(q[key]);
+  }
+  if (q.diet) options.diet = q.diet;
+  if (q.labels.length) options.labels = q.labels;
+  if (!q.weighted) options.weighted = false;
+  if (!q.coherent) options.coherent = false;
+  if (q.with_datetime) options.with_datetime = true;
+  return options;
+}
+
+function callCode(name, options) {
+  const info = methodInfo[name];
+  const args = [];
+  for (const param of info.required) {
+    const source = REQUIRED_SOURCES[param];
+    if (!(source in options)) return ["None", `  # ${name}() a besoin du champ « ${FIELD_NAMES[source]} »`];
+    args.push(`${param}=${py(source === "labels" ? options.labels[0] : options[source])}`);
+  }
+  for (const key of info.options) if (key in options) args.push(`${key}=${py(options[key])}`);
+  return [`fake.${name}(${args.join(", ")})`, ""];
+}
+
+function methodsCode(q) {
+  const options = methodOptions(q);
+  const calls = q.methods.map((name) => [name, callCode(name, options)]);
+  if (q.count === 1) return header(q, calls.map(([name, [call, note]]) => `${name} = ${call}${note}`));
+  return header(q, ["records = [", "    {",
+    ...calls.map(([name, [call, note]]) => `        ${py(name)}: ${call},${note}`),
+    "    }", `    for _ in range(${q.count})`, "]"]);
+}
+
+function datasetCode(q) {
+  const args = [py(q.kind), String(q.count), `locale=${py(q.locale)}`];
+  const cli = ["faker-grocery export", q.kind, "-n", q.count, "--locale", q.locale];
+  if (q.seed !== "") { args.push(`seed=${Number(q.seed)}`); cli.push("--seed", Number(q.seed)); }
+  if (q.kind !== "sales" && q.diet) { args.push(`diet=${py(q.diet)}`); cli.push("--diet", q.diet); }
+  if (q.kind === "customers" && Number(q.trips) !== 10) { args.push(`trips=${Number(q.trips)}`); cli.push("--trips", Number(q.trips)); }
+  if (q.kind === "sales") {
+    if (q.start) {
+      const [y, m, d] = q.start.split("-").map(Number);
+      args.push(`start=datetime.date(${y}, ${m}, ${d})`);
+      cli.push("--start", q.start);
+    }
+    if (q.by !== "department") { args.push(`by=${py(q.by)}`); cli.push("--by", q.by); }
+    if (Number(q.baskets_per_day) !== 1000) { args.push(`baskets_per_day=${Number(q.baskets_per_day)}`); cli.push("--baskets-per-day", Number(q.baskets_per_day)); }
+  }
+  const lines = [];
+  if (q.currency || q.pattern) {
+    lines.push("# Devise / profil d'affluence choisis : to_dataframe() et la ligne de commande",
+      "# prennent ceux de la locale (même résultat avec les valeurs « (locale) »).", "");
+  }
+  lines.push("# Ligne de commande (CSV ; --format json ou jsonl pour le JSON)",
+    `# ${cli.join(" ")} -o ${q.kind}.csv`, "");
+  if (q.kind === "sales" && q.start) lines.push("import datetime", "");
+  lines.push("from faker_grocery.export import to_dataframe  # pip install \"faker-grocery[data]\"", "",
+    `df = to_dataframe(${args.join(", ")})`);
+  return lines.join("\n") + "\n";
+}
+
+function cell(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value) && value.every((v) => typeof v !== "object")) return value.join("|");
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+function table(container, rows) {
+  container.replaceChildren();
+  if (!rows.length) return;
+  const keys = columns(rows);
+  const t = document.createElement("table");
+  const head = t.createTHead().insertRow();
+  for (const key of keys) head.append(Object.assign(document.createElement("th"), { textContent: key }));
+  const body = t.createTBody();
+  for (const row of rows.slice(0, PREVIEW_ROWS)) {
+    const tr = body.insertRow();
+    for (const key of keys) {
+      const td = tr.insertCell();
+      td.textContent = cell(row[key]);
+      td.title = td.textContent;
+    }
+  }
+  container.append(t);
+}
+
+function columns(rows) {
+  const keys = new Set();
+  for (const row of rows) for (const key of Object.keys(row)) keys.add(key);
+  return [...keys];
+}
+
+function toCsv(rows) {
+  if (!rows.length) return "";
+  const keys = columns(rows);
+  const quote = (text) => (/[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text);
+  return [keys.join(","), ...rows.map((row) => keys.map((key) => quote(cell(row[key]))).join(","))].join("\r\n") + "\r\n";
+}
+
+function save(text, type, name) {
+  const link = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(new Blob([text], { type })), download: name,
+  });
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+$("download-methods").onclick = () => {
+  if (methodsResult) save(JSON.stringify(methodsResult, null, 2) + "\n", "application/json", "grocery.json");
+};
+
+for (const button of document.querySelectorAll("[data-download]")) {
+  button.onclick = () => {
+    if (!dataset) return;
+    const name = `${dataset.kind}.${button.dataset.download}`;
+    if (button.dataset.download === "csv") save(toCsv(dataset.rows), "text/csv", name);
+    else if (button.dataset.download === "jsonl") save(dataset.records.map((r) => JSON.stringify(r)).join("\n") + "\n", "application/x-ndjson", name);
+    else save(JSON.stringify(dataset.records, null, 2) + "\n", "application/json", name);
+  };
+}
+
+init().catch((err) => ($("locale-info").textContent = err.message));
+</script>
+</body>
+</html>

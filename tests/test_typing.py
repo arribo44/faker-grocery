@@ -12,7 +12,9 @@ from typing import assert_type
 from faker import Faker
 
 from faker_grocery import (
+    AisleInfo,
     CustomerProfile,
+    DepartmentInfo,
     GroceryItem,
     GroceryList,
     GroceryStore,
@@ -56,6 +58,14 @@ class TestTypedDictsMatchRuntime(unittest.TestCase):
         self.assertEqual(set(receipt), Receipt.__required_keys__)
         self.assertEqual(set(receipt["lines"][0]), set(ReceiptLine.__annotations__))
         self.assertEqual(set(receipt["taxes"][0]), set(TaxLine.__annotations__))
+
+    def test_catalog_listing_keys(self) -> None:
+        provider = GroceryStoreProvider(self.fake)
+        departments: list[DepartmentInfo] = provider.grocery_departments()
+        aisles: list[AisleInfo] = provider.grocery_aisles()
+        assert_type(aisles[0]["department_id"], int)
+        self.assertEqual(set(departments[0]), set(DepartmentInfo.__annotations__))
+        self.assertEqual(set(aisles[0]), set(AisleInfo.__annotations__))
 
     def test_sales_row_keys(self) -> None:
         provider = GroceryStoreProvider(self.fake)

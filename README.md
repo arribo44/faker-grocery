@@ -100,6 +100,12 @@ fake.aisle(department=16)               # same, by id
 fake.aisle_id(department=16)            # 120
 fake.aisle(weighted=False)              # uniform pick (default: popular aisles more often)
 fake.aisle_name(120)                    # "yaourt"
+
+# The whole catalog structure, named in the current language
+fake.grocery_departments()              # [{'id': 1, 'name': 'surgelés'}, ...] (21)
+fake.grocery_aisles()                   # [{'id': 1, 'name': 'soupes et salades préparées',
+                                        #   'department_id': 20, 'department': 'traiteur'}, ...] (134)
+fake.grocery_aisles(department=16)      # the 10 aisles of "produits laitiers et œufs"
 ```
 
 > **Why `grocery_department()`?** Faker's own address providers already use
@@ -473,9 +479,9 @@ demo needs one.
 
 The package is fully typed (it ships a `py.typed` marker), and the dicts it
 returns are described by `TypedDict`s: `ProductRecord`, `GroceryItem`,
-`GroceryList`, `CustomerProfile`, `GroceryStore`, `Receipt`, `ReceiptLine`
-and `TaxLine`. Editors then autocomplete their keys, and mypy/pyright flag
-typos and type errors:
+`GroceryList`, `CustomerProfile`, `GroceryStore`, `Receipt`, `ReceiptLine`,
+`TaxLine`, `SalesRow`, `DepartmentInfo` and `AisleInfo`. Editors then
+autocomplete their keys, and mypy/pyright flag typos and type errors:
 
 ```text
 error: TypedDict "GroceryItem" has no key "totl_price"
@@ -568,6 +574,29 @@ Same kinds, rows and options as the command line (`diet`, `start`, `by`,
 `baskets_per_day`, `trips`); date and time columns are pandas datetimes.
 
 For a complete demo with more examples per feature and both locales, see [`examples/basic_usage.py`](examples/basic_usage.py).
+
+### 🖥️ Web playground
+
+A local web page to try the methods without writing code (from a clone of
+the repository; it is not part of the installed package):
+
+```bash
+python playground/app.py            # http://127.0.0.1:8000  (--port 8080 to change it)
+```
+
+Pick a locale, a currency, a shopping pattern and a seed, then:
+
+- **Methods**: tick one or more provider methods, set their options
+  (department, aisle, diet, labels, month, household size, product id...)
+  and the number of records; the result is shown as JSON, with the
+  equivalent Python code (same seed, same output).
+- **Dataset**: baskets, receipts, customers, products or daily sales, as
+  with `faker-grocery export`: JSON, a table of the flat rows, downloads as
+  JSON, JSON Lines or CSV, and the equivalent command line and
+  `to_dataframe()` call.
+
+Standard library only (plus faker and faker-grocery); it listens on
+127.0.0.1 by default.
 
 ---
 

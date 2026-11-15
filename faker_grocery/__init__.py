@@ -192,6 +192,22 @@ class SalesRow(TypedDict):
     currency: str
 
 
+class DepartmentInfo(TypedDict):
+    """A store department, as listed by `GroceryStoreProvider.grocery_departments()`."""
+
+    id: int
+    name: str
+
+
+class AisleInfo(TypedDict):
+    """An aisle, as listed by `GroceryStoreProvider.grocery_aisles()`."""
+
+    id: int
+    name: str
+    department_id: int
+    department: str
+
+
 SALES_GROUPINGS = ("total", "department", "aisle")
 
 
@@ -540,6 +556,25 @@ class GroceryStoreProvider(BaseProvider):
         if not _is_id(aisle_id) or str(int(aisle_id)) not in self.aisles:
             raise ValueError(f"Unknown aisle id: {aisle_id!r}")
         return self.aisles[str(int(aisle_id))][self._lang]
+
+    def grocery_departments(self) -> list[DepartmentInfo]:
+        """Return every store department, by id, named in the current language:
+        [{'id': 1, 'name': 'surgelés'}, ...] (21 departments)."""
+        return [{"id": int(dept_id), "name": names[self._lang]}
+                for dept_id, names in sorted(self.departments.items(), key=lambda item: int(item[0]))]
+
+    def grocery_aisles(self, department: IdOrName | None = None) -> list[AisleInfo]:
+        """Return every aisle (134), or those of a department (id or localized
+        name), by id, with their department, named in the current language:
+        [{'id': 1, 'name': 'soupes et salades préparées', 'department_id': 20,
+        'department': 'traiteur'}, ...]."""
+        dept_id = self._resolve_department_id(department)
+        return [
+            {"id": int(aisle_id), "name": info[self._lang], "department_id": info["department_id"],
+             "department": self.departments[str(info["department_id"])][self._lang]}
+            for aisle_id, info in sorted(self.aisles.items(), key=lambda item: int(item[0]))
+            if dept_id is None or info["department_id"] == dept_id
+        ]
 
     # -- products -----------------------------------------------------------
 
