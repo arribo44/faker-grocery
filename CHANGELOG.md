@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.1] - 2026-11-15
 
+> Not published on PyPI: its fix ships in 0.13.0.
+
 ### Fixed
 - `faker-grocery export ... | head` no longer prints `BrokenPipeError` when the output is small: 0.12.0 only handled a pipe closed during the export, not on the final flush of a still-buffered output.
 
