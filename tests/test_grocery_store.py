@@ -143,6 +143,30 @@ class TestGroceryStoreProvider(unittest.TestCase):
         for aisle_id, info in self.provider.aisles.items():
             self.assertEqual(self.fake.aisle_name(aisle_id), info["fr"])
 
+    def test_grocery_departments_lists_every_department(self):
+        departments = self.fake.grocery_departments()
+        self.assertEqual([d["id"] for d in departments], sorted(int(i) for i in self.provider.departments))
+        for d in departments:
+            self.assertEqual(d["name"], self.fake.grocery_department_name(d["id"]))
+
+    def test_grocery_aisles_lists_every_aisle(self):
+        aisles = self.fake.grocery_aisles()
+        self.assertEqual([a["id"] for a in aisles], sorted(int(i) for i in self.provider.aisles))
+        for a in aisles:
+            self.assertEqual(a["name"], self.fake.aisle_name(a["id"]))
+            self.assertEqual(a["department"], self.fake.grocery_department_name(a["department_id"]))
+
+    def test_grocery_aisles_of_a_department(self):
+        by_id = self.fake.grocery_aisles(16)
+        self.assertTrue(by_id)
+        self.assertTrue(all(a["department_id"] == 16 for a in by_id))
+        self.assertEqual(self.fake.grocery_aisles(self.provider.departments["16"]["fr"]), by_id)
+        self.assertEqual(self.fake.grocery_aisles("dairy eggs"), by_id)
+        self.assertEqual(len(self.fake.grocery_aisles()), sum(len(self.fake.grocery_aisles(d["id"]))
+                                                              for d in self.fake.grocery_departments()))
+        with self.assertRaises(ValueError):
+            self.fake.grocery_aisles("not a department")
+
     def test_grocery_department_name_with_integer_id(self):
         self.assertEqual(self.fake.grocery_department_name(16), self.provider.departments["16"]["fr"])
 
