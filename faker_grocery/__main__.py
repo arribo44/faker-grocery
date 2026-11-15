@@ -292,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 export(args.kind, args.count, args.locale, args.format, sys.stdout, args.seed, args.trips,
                        args.csv_safe)
+                # Flush here: a small output is still buffered, and a broken
+                # pipe would otherwise only surface at interpreter exit.
+                sys.stdout.flush()
         except BrokenPipeError:
             # `faker-grocery export ... | head`: the reader left, not an error.
             # Point stdout at devnull so the interpreter's final flush is quiet.
