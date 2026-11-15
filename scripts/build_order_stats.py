@@ -23,8 +23,14 @@ The raw files come from the same Kaggle dataset as DATAS/*.csv (see the
 README) and are only needed to regenerate these statistics:
 
     python scripts/build_order_stats.py path/to/orders.csv path/to/order_products__prior.csv
+
+The raw files are checked against the SHA-256 of the copy the versioned
+statistics were built from (see RAW_SHA256), since they come from a
+third-party mirror. `--no-verify` skips the check, e.g. to try another
+release of the dataset on purpose.
 """
 import csv
+import hashlib
 import itertools
 import os
 import statistics
@@ -33,6 +39,28 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATAS_DIR = os.path.join(ROOT, "DATAS")
+
+# SHA-256 of the raw files DATAS/*.csv statistics were built from.
+RAW_SHA256 = {
+    "orders.csv": "92a60ced67ac33bd82271f66ff9675374f69482d17a0e1442ba42caa8b3bff89",
+    "order_products__prior.csv": "27b59dc9cf0d485f55e64e0bc9c5d6fb077ae167f8dfeab9246a03b5b0186359",
+}
+
+
+def sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify(path, name):
+    """Exit with an error if `path` isn't the expected `name` raw file."""
+    actual = sha256(path)
+    if actual != RAW_SHA256[name]:
+        sys.exit(f"{path}: SHA-256 {actual} doesn't match the expected {name} "
+                 f"({RAW_SHA256[name]}). Use --no-verify to build from it anyway.")
 
 
 def order_times(orders_path):
@@ -158,6 +186,12 @@ def main(orders_path, order_products_path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    check = "--no-verify" not in args
+    args = [a for a in args if a != "--no-verify"]
+    if len(args) != 2:
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2])
+    if check:
+        verify(args[0], "orders.csv")
+        verify(args[1], "order_products__prior.csv")
+    main(args[0], args[1])
