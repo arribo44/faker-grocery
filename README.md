@@ -1,6 +1,6 @@
 # Faker Grocery Store Provider
 
-**A custom [Faker](https://faker.readthedocs.io/) provider for generating realistic fake data for supermarkets and hypermarkets: departments, aisles, products (with package sizes and EAN-13 barcodes), prices, seasonal and coherent shopping lists, recurring customers and till receipts with VAT and promotions.**
+**A custom [Faker](https://faker.readthedocs.io/) provider for generating realistic fake data for supermarkets and hypermarkets: departments, aisles, products (with package sizes, EAN-13 barcodes and labels such as organic or gluten free), prices, seasonal and coherent shopping lists, customers with or without a diet, till receipts with VAT and promotions, and daily sales time series - as Python dicts, CSV, JSON, Parquet or pandas DataFrames.**
 
 The catalog is built from the [Instacart Market Basket Analysis](https://www.kaggle.com/c/instacart-market-basket-analysis) open dataset: **21 departments**, **134 aisles** and **~49,700 real products**.
 
@@ -53,8 +53,10 @@ to the English name, mostly brand names ("Cheerios Honey Nut", "Smartwater").
 Requires Python 3.11+ and Faker 20+.
 
 ```bash
-cd faker_grocery
-pip install -e .
+pip install faker-grocery
+
+# With pandas DataFrames and Parquet export (pandas, pyarrow):
+pip install "faker-grocery[data]"
 ```
 
 ---
@@ -169,6 +171,42 @@ each one was ordered in the ~32M order lines of the Instacart data. Bananas,
 strawberries, milk or avocados come up far more often than niche items, as
 in a real basket. Pass `weighted=False` to `product()`, `product_record()`,
 `grocery_item()` or `grocery_list()` for a uniform pick across the catalog.
+
+### 🏷️ Labels and diets
+
+```python
+fake.product_record()["labels"]               # ['organic', 'gluten_free'], often []
+fake.product_labels(13176)                    # ['organic'] ("Bag of Organic Bananas")
+fake.product(labels="organic")                # only organic products
+fake.product(labels=["vegan", "gluten_free"]) # products carrying both labels
+fake.grocery_label_name("gluten_free")        # "sans gluten" (localized)
+fake.grocery_labels()   # ['organic', 'gluten_free', 'vegan', 'lactose_free', 'sugar_free',
+                        #  'low_fat', 'whole_grain', 'kosher', 'non_gmo']
+
+fake.product(diet="vegan")                    # products a vegan customer may buy
+fake.grocery_list(diet="gluten_free")         # a whole basket fitting the diet
+fake.product_fits_diet(24852, "vegetarian")   # True (bananas)
+fake.grocery_diets()    # ['vegetarian', 'vegan', 'gluten_free', 'lactose_free']
+fake.grocery_diet_name("vegetarian")          # "végétarien"
+```
+
+**Labels** are what a product's name claims ("Organic", "Gluten Free",
+"Low Fat", "Whole Wheat"...) plus a few implied ones (vegan products and
+plant-based milks are lactose free): 5,004 organic products, ~980 low fat,
+~850 lactose free, ~810 gluten free, ~500 whole grain, ~340 sugar free, 191
+vegan, 65 kosher, 22 non-GMO. A product that doesn't say it is gluten free
+isn't labelled so, even when it naturally is (bananas).
+
+**Diets** say what a customer following one may buy: meat and fish aisles
+are excluded for vegetarians, as are names mentioning chicken, bacon,
+anchovies... wherever they are shelved (soups, frozen meals); vegans also
+skip eggs, dairy, honey and names mentioning cheese, butter, milk... unless
+plant-based; gluten free excludes bread, pasta, cereal, beer and names
+mentioning wheat, noodles, breaded... unless labelled gluten free; lactose
+free excludes dairy unless labelled. They keep 73% (vegan) to 94%
+(vegetarian) of what is bought. **Rules on names and aisles, approximate:
+fake data, never real dietary or allergy information** (a "Hawaiian pizza"
+whose name doesn't say "ham" passes as vegetarian).
 
 ### 💰 Prices, quantities, units
 
@@ -325,7 +363,11 @@ customer = fake.customer_profile()      # or customer_profile(family_size=4)
 # {'customer_id': 106053, 'name': 'Théophile Gosselin', 'family_size': 3,
 #  'favorite_product_ids': [10246, 49044, ...],   # 8 + 4 per person, often re-ordered products
 #  'shopping_interval_days': 7,                    # 1 to 30, weekly and monthly most often
-#  'reorder_rate': 0.54}                           # share of items re-ordered from favorites
+#  'reorder_rate': 0.54,                           # share of items re-ordered from favorites
+#  'diet': None}
+
+fake.customer_profile(diet="vegan")     # favorites and baskets fit the diet
+fake.customer_profile(diet="random")    # ~5% vegetarian, 2% vegan, 2% gluten free, 4% lactose free
 
 history = fake.customer_history(customer, trips=12)    # 12 baskets, oldest first
 history = fake.customer_history(trips=12, end_date=datetime.date(2026, 6, 30))
@@ -393,6 +435,38 @@ Days a pattern has shops closed never come up, unless you force one with
 patterns are hand-made heuristics, not measured data. Instacart's
 day-of-week encoding is undocumented and read as 0 = Sunday.
 
+### 📈 Sales time series
+
+```python
+import datetime
+
+provider = GroceryStoreProvider(fake)   # or fake.sales_series(...)
+rows = provider.sales_series(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+# one row per day and department:
+# {'date': datetime.date(2026, 1, 1), 'baskets': 1185, 'department_id': 4,
+#  'department': 'fruits et légumes', 'items': 3470, 'revenue': 15240.61, 'currency': 'EUR'}
+
+provider.sales_series(start, end, by="aisle")       # per day and aisle (134 rows a day)
+provider.sales_series(start, end, by="total")       # per day, whole store
+provider.sales_series(baskets_per_day=3000)         # a hypermarket (default 1000); last 30 days
+provider.sales_series(start, end, noise=0)          # smooth series (default 0.1)
+```
+
+Built from the same measured data as the baskets, without simulating each
+basket (a year of a store takes well under a second):
+
+- **traffic** follows the locale's weekly shopping pattern around
+  `baskets_per_day`: busy Fridays and Saturdays, nothing on days shops
+  are closed (Sundays in Germany), with day-to-day variation (`noise`);
+- **items per basket** follow the Instacart basket sizes (~10 on average);
+- **the mix of aisles** follows product popularity, with fresh produce in
+  and out of season month by month (hemisphere-aware);
+- **revenue** uses the catalog prices, in the locale's currency.
+
+`baskets` is the store's number of baskets that day, repeated on each row.
+There is no trend, holiday or promotion effect: add them on top if your
+demo needs one.
+
 ---
 
 ### 🔤 Type hints
@@ -443,13 +517,26 @@ faker-grocery export baskets -n 10000 --locale fr_FR --format csv -o baskets.csv
 faker-grocery export receipts -n 500 --format jsonl --seed 42 > receipts.jsonl
 faker-grocery export customers -n 200 --trips 12 --format json -o customers.json
 faker-grocery export products -n 5000 --locale it_IT --format csv -o products.csv
+
+# Diets, sales, Parquet
+faker-grocery export customers -n 1000 --diet random --format parquet -o customers.parquet
+faker-grocery export baskets -n 500 --diet vegan -o vegan_baskets.csv
+faker-grocery export sales -n 365 --start 2026-01-01 --by aisle --locale de_DE -o sales.csv
 ```
 
-- **Formats**: `csv` has one row per basket item (`baskets`, `customers`),
-  per receipt line (`receipts`) or per product, with the basket / receipt /
+- **Formats**: `csv` and `parquet` have one row per basket item
+  (`baskets`, `customers`), per receipt line (`receipts`), per product or
+  per day and department / aisle (`sales`), with the basket / receipt /
   customer fields repeated on each row - ready for a spreadsheet, pandas or
   a database import. `jsonl` (one record per line) and `json` keep the
-  nested structure. Dates are ISO 8601.
+  nested structure. Dates are ISO 8601 in text formats, native dates and
+  timestamps in Parquet; labels are `organic|gluten_free` in CSV, lists in
+  Parquet. Parquet needs `pip install "faker-grocery[data]"` and `-o`.
+- **`sales`**: `-n` is a number of days from `--start` (default: January
+  1st of this year), grouped `--by total|department|aisle`, around
+  `--baskets-per-day` (default 1000).
+- **`--diet`** keeps baskets, receipts, customers or products to one diet;
+  `--diet random` gives a few customers one (see Recurring customers).
 - `--seed` makes the output reproducible; `--locale` sets the language,
   currency, VAT, shopping hours and seasons (an unknown locale is rejected
   with the close matches); without `-o` the output goes to standard output.
@@ -461,6 +548,24 @@ faker-grocery export products -n 5000 --locale it_IT --format csv -o products.cs
   a `'`, so that a spreadsheet opening the file can't run them as formulas
   (CSV injection). Off by default because it also changes legitimate
   values, such as promotion labels (`-30 %` -> `'-30 %`).
+
+### 🐼 pandas and Parquet from Python
+
+```python
+from faker_grocery.export import to_dataframe, export_parquet
+
+df = to_dataframe("baskets", 1000, locale="fr_FR", seed=42)      # one row per basket item
+df.groupby("department")["total_price"].sum()
+
+sales = to_dataframe("sales", 365, locale="de_DE", by="aisle", start=datetime.date(2026, 1, 1))
+customers = to_dataframe("customers", 200, diet="random", trips=12)
+receipts = to_dataframe("receipts", 50, flat=False)              # one row per receipt, nested lines
+
+export_parquet("receipts", 10000, "en_US", "receipts.parquet", seed=1)
+```
+
+Same kinds, rows and options as the command line (`diet`, `start`, `by`,
+`baskets_per_day`, `trips`); date and time columns are pandas datetimes.
 
 For a complete demo with more examples per feature and both locales, see [`examples/basic_usage.py`](examples/basic_usage.py).
 
@@ -477,7 +582,7 @@ A single gzip-compressed JSON file, `faker_grocery/data/grocery_data.json.gz`, h
 
 - `departments`: `{department_id: {language: name}}`
 - `aisles`: `{aisle_id: {language: name, department_id: int}}` (each aisle belongs to exactly one department)
-- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, reorder_count, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none)
+- `products`: compact rows `[id, aisle_id, department_id, base_price, order_count, unit, size, season, reorder_count, labels, diets, name_en]` (`order_count`: popularity, see below; `unit`: the product's fixed unit key; `base_price` is per kg/L for measured units; `size`: `[count, amount, "g"|"ml"|null]` or null; `season`: 12-bit mask of the months a fresh product is in season, 0 for none; `labels` / `diets`: bit masks over `label_keys` / `diet_keys`, built by `scripts/label_tables.py`)
 - translated product names live in separate files, `faker_grocery/data/names_<lang>.json.gz` (a list parallel to `products`, listed in `meta.name_files`), loaded on first use of that language
 - `price_ranges`: `{department_id: [min_price, max_price]}` (in the base currency, EUR)
 - `currencies`: `{code: {symbol, rate, price_level, decimals}}` - fixed approximate EUR -> currency rates and grocery price levels

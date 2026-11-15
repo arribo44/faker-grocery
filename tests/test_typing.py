@@ -20,6 +20,7 @@ from faker_grocery import (
     ProductRecord,
     Receipt,
     ReceiptLine,
+    SalesRow,
     TaxLine,
 )
 
@@ -55,6 +56,16 @@ class TestTypedDictsMatchRuntime(unittest.TestCase):
         self.assertEqual(set(receipt), Receipt.__required_keys__)
         self.assertEqual(set(receipt["lines"][0]), set(ReceiptLine.__annotations__))
         self.assertEqual(set(receipt["taxes"][0]), set(TaxLine.__annotations__))
+
+    def test_sales_row_keys(self) -> None:
+        provider = GroceryStoreProvider(self.fake)
+        day = datetime.date(2026, 1, 1)
+        rows: list[SalesRow] = provider.sales_series(day, day, by="aisle")
+        assert_type(rows[0]["revenue"], float)
+        self.assertEqual(set(rows[0]), set(SalesRow.__annotations__))
+        self.assertEqual(set(provider.sales_series(day, day, by="total")[0]), SalesRow.__required_keys__)
+        self.assertEqual(set(provider.sales_series(day, day)[0]),
+                         SalesRow.__required_keys__ | {"department_id", "department"})
 
 
 class TestDocumentedTypedUsage(unittest.TestCase):

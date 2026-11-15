@@ -26,9 +26,10 @@ class TestExport(unittest.TestCase):
         for kind in EXPORT_KINDS:
             text, _ = run_export(kind, "json")
             records = json.loads(text)
-            self.assertEqual(len(records), 3, msg=kind)
+            # sales: -n is a number of days, one record per day and department.
+            self.assertEqual(len(records), 3 * 21 if kind == "sales" else 3, msg=kind)
             lines = run_export(kind, "jsonl")[0].splitlines()
-            self.assertEqual(len(lines), 3, msg=kind)
+            self.assertEqual(len(lines), len(records), msg=kind)
             self.assertEqual(json.loads(lines[0]), records[0], msg=kind)
             text, written = run_export(kind, "csv")
             rows = list(csv.DictReader(io.StringIO(text)))

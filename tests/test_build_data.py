@@ -15,6 +15,7 @@ from faker_grocery import GroceryStoreProvider, _ensure_language
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
+from label_tables import DIETS, LABELS, diets_mask, labels_mask  # noqa: E402
 from build_data import (  # noqa: E402
     FUNCTION_WORDS,
     TRANSLATIONS_DIR,
@@ -175,6 +176,42 @@ class TestCuratedNames(unittest.TestCase):
             with open(os.path.join(TRANSLATIONS_DIR, f"product_names_{lang}.json"), encoding="utf-8") as f:
                 ids = list(json.load(f))
             self.assertEqual(ids, sorted(ids, key=int), msg=lang)
+
+
+
+def _labels(name, aisle_id=1):
+    mask = labels_mask(name, aisle_id)
+    return [key for bit, key in enumerate(LABELS) if mask & (1 << bit)]
+
+
+def _diets(name, aisle_id, department_id=1):
+    mask = diets_mask(name, aisle_id, department_id, labels_mask(name, aisle_id))
+    return [key for bit, key in enumerate(DIETS) if mask & (1 << bit)]
+
+
+class TestLabelTables(unittest.TestCase):
+    def test_labels_from_names(self):
+        self.assertEqual(_labels("Organic Gluten-Free Penne"), ["organic", "gluten_free"])
+        self.assertEqual(_labels("Unsweetened Almond Milk"), ["lactose_free"])
+        self.assertEqual(_labels("Vegan Mac & Cheese"), ["vegan", "lactose_free"])
+        self.assertEqual(_labels("Fat Free Skim Milk"), ["low_fat"])
+        self.assertEqual(_labels("100% Whole Wheat Bread"), ["whole_grain"])
+        self.assertEqual(_labels("Soymilk", aisle_id=91), ["lactose_free"])  # "soy lactosefree" aisle
+        self.assertEqual(_labels("Organically Grown Bananas"), [])  # whole words only
+
+    def test_diets(self):
+        all_diets = ["vegetarian", "vegan", "gluten_free", "lactose_free"]
+        self.assertEqual(_diets("Banana", 24, 4), all_diets)
+        self.assertEqual(_diets("Chicken Noodle Soup", 69, 15), ["lactose_free"])
+        self.assertEqual(_diets("Meatless Chicken Strips", 14, 20), all_diets)
+        self.assertEqual(_diets("Whole Milk", 84, 16), ["vegetarian", "gluten_free"])
+        self.assertEqual(_diets("Oat Milk", 84, 16), all_diets)
+        self.assertEqual(_diets("Sourdough Bread", 112, 3), ["vegetarian", "vegan", "lactose_free"])
+        self.assertEqual(_diets("Gluten Free Sandwich Bread", 112, 3), all_diets)
+        self.assertEqual(_diets("Clover Honey", 29, 13), ["vegetarian", "gluten_free", "lactose_free"])
+        self.assertEqual(_diets("Peanut Butter", 88, 13), all_diets)
+        self.assertEqual(_diets("Large Eggs", 86, 16), ["vegetarian", "gluten_free", "lactose_free"])
+        self.assertEqual(_diets("Dish Soap", 74, 17), all_diets)  # non-food: no concern
 
 
 if __name__ == "__main__":

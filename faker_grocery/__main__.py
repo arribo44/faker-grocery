@@ -10,10 +10,14 @@ Command line for faker_grocery: `python -m faker_grocery` (or the
     faker-grocery export customers -n 50 --trips 12 --format csv
     faker-grocery export products -n 2000 --format json
     faker-grocery export products -n 500 --format csv --csv-safe -o products.csv
+    faker-grocery export customers -n 200 --diet random --format parquet -o customers.parquet
+    faker-grocery export sales -n 365 --start 2026-01-01 --by aisle --locale de_DE -o sales.csv
 
-CSV has one row per basket item (baskets, customers), per receipt line
-(receipts) or per product (products), the basket/receipt fields repeated on
-each row; JSON / JSON Lines keep the nested structure. `--csv-safe` prefixes
+CSV and Parquet have one row per basket item (baskets, customers), per
+receipt line (receipts), per product (products) or per day and department /
+aisle (sales: -n is a number of days), the basket/receipt fields repeated on
+each row; JSON / JSON Lines keep the nested structure. Parquet needs
+pyarrow (pip install "faker-grocery[data]") and -o. `--csv-safe` prefixes
 text cells starting with = + - @ (or a tab / carriage return) with a quote,
 so that spreadsheet software opening the file doesn't run them as formulas.
 
@@ -23,20 +27,25 @@ half-written file behind.
 """
 import argparse
 import contextlib
-import csv
 import datetime
-import json
 import os
 import sys
 import tempfile
-import textwrap
-from collections.abc import Collection, Iterator
-from typing import IO, Any, TypeVar
+from collections.abc import Collection
+from typing import Any, TypeVar
 
 from faker import Faker
 from faker.config import AVAILABLE_LOCALES
 
-from faker_grocery import GroceryStoreProvider
+from faker_grocery import SALES_GROUPINGS, GroceryStoreProvider
+from faker_grocery.export import (  # noqa: F401 - _csv_cell re-exported for tests
+    DIETS,
+    EXPORT_KINDS,
+    FORMATS,
+    _csv_cell,
+    export,
+    export_parquet,
+)
 
 T = TypeVar("T")
 
@@ -102,6 +111,17 @@ def demo(locale: str) -> None:
     shopping_list = fake.grocery_list(family_size=4)
     print(f"  Item count: {shopping_list['item_count']}  Total: {shopping_list['total']} {shopping_list['currency']}")
 
+    print("\n--- Labels and diets ---")
+    for label in ("organic", "gluten_free", "vegan"):
+        print(f"  {provider.grocery_label_name(label)}: {fake.product(labels=label)}")
+    vegan_basket = provider.grocery_list(diet="vegan", min_items=3, max_items=3)
+    print(f"  {provider.grocery_diet_name('vegan')} basket: {', '.join(i['product'] for i in vegan_basket['items'])}")
+
+    print("\n--- Sales (last 7 days, whole store) ---")
+    for row in provider.sales_series(datetime.date.today() - datetime.timedelta(days=6), by="total"):
+        print(f"  {row['date']:%a %Y-%m-%d}: {row['baskets']} baskets, {row['items']} items, "
+              f"{row['revenue']} {row['currency']}")
+
     print("\n--- Receipt ---")
     receipt = provider.receipt(promotion_rate=0.3)
     print(f"  {receipt['store']['name']} - {receipt['store']['address']}")
@@ -116,99 +136,6 @@ def demo(locale: str) -> None:
 
 
 # -- export -----------------------------------------------------------------------
-
-EXPORT_KINDS = ("baskets", "receipts", "customers", "products")
-FORMATS = ("csv", "jsonl", "json")
-
-
-def _records(provider: GroceryStoreProvider, kind: str, count: int, trips: int) -> Iterator[dict[str, Any]]:
-    """`count` nested records of `kind`, each with a stable id."""
-    for index in range(1, count + 1):
-        if kind == "baskets":
-            yield {"basket_id": index, **provider.grocery_list(with_datetime=True)}
-        elif kind == "receipts":
-            yield {"receipt_id": index, **provider.receipt()}
-        elif kind == "customers":
-            profile = provider.customer_profile()
-            history = provider.customer_history(profile, trips=trips)
-            yield {**profile, "baskets": [{"trip": n, **basket} for n, basket in enumerate(history, 1)]}
-        else:
-            yield dict(provider.product_record())
-
-
-def _flat_rows(kind: str, record: dict[str, Any]) -> Iterator[dict[str, Any]]:
-    """CSV rows of a record: one per item / line, parent fields repeated."""
-    if kind == "products":
-        yield record
-    elif kind == "baskets":
-        parent = {k: v for k, v in record.items() if k != "items"}
-        for item in record["items"]:
-            yield {**parent, **item}
-    elif kind == "receipts":
-        parent = {k: v for k, v in record.items() if k not in ("lines", "taxes", "store")}
-        store = {f"store_{k}": v for k, v in record["store"].items()}
-        for line in record["lines"]:
-            yield {**parent, **store, **{f"line_{k}" if k in parent else k: v for k, v in line.items()}}
-    else:
-        customer = {k: v for k, v in record.items() if k not in ("baskets", "favorite_product_ids")}
-        for basket in record["baskets"]:
-            parent = {k: v for k, v in basket.items() if k not in ("items", "customer_id", "family_size")}
-            for item in basket["items"]:
-                yield {**customer, **parent, **item}
-
-
-def _json_default(value: object) -> str:
-    if isinstance(value, datetime.date | datetime.datetime):
-        return value.isoformat()
-    raise TypeError(f"Not JSON serializable: {type(value).__name__}")
-
-
-_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _csv_cell(value: Any, safe: bool) -> Any:
-    if isinstance(value, datetime.date):
-        return value.isoformat()
-    if safe and isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
-        return "'" + value
-    return value
-
-
-def export(kind: str, count: int, locale: str, fmt: str, out: IO[str], seed: int | None = None,
-           trips: int = 10, csv_safe: bool = False) -> int:
-    """Write `count` generated `kind` records to `out`; returns the number of
-    rows / records written. Records are generated and written one at a time,
-    so memory use doesn't grow with `count` (JSON included)."""
-    fake = Faker(locale)
-    if seed is not None:
-        fake.seed_instance(seed)
-    provider = GroceryStoreProvider(fake)
-    records = _records(provider, kind, count, trips)
-    written = 0
-    if fmt == "json":
-        # Same output as json.dump(list, indent=2), without the list in memory.
-        out.write("[")
-        for record in records:
-            text = json.dumps(record, ensure_ascii=False, indent=2, default=_json_default)
-            out.write(("," if written else "") + "\n" + textwrap.indent(text, "  "))
-            written += 1
-        out.write("\n]\n" if written else "]\n")
-        return written
-    if fmt == "jsonl":
-        for record in records:
-            out.write(json.dumps(record, ensure_ascii=False, default=_json_default) + "\n")
-            written += 1
-        return written
-    writer: csv.DictWriter[str] | None = None
-    for record in records:
-        for row in _flat_rows(kind, record):
-            row = {k: _csv_cell(v, csv_safe) for k, v in row.items()}
-            if writer is None:
-                writer = csv.DictWriter(out, fieldnames=list(row), extrasaction="ignore", restval="")
-                writer.writeheader()
-            writer.writerow(row)
-            written += 1
-    return written
 
 
 def _positive(value: str) -> int:
@@ -227,9 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     demo_parser = commands.add_parser("demo", help="print examples of every generator")
     demo_parser.add_argument("--locale", action="append", help="Faker locale (repeatable; default: en_US and fr_FR)")
-    export_parser = commands.add_parser("export", help="generate many records to CSV / JSON / JSON Lines")
+    export_parser = commands.add_parser("export", help="generate many records to CSV / JSON / JSON Lines / Parquet")
     export_parser.add_argument("kind", choices=EXPORT_KINDS)
-    export_parser.add_argument("-n", "--count", type=_positive, default=100, help="number of records (default 100)")
+    export_parser.add_argument("-n", "--count", type=_positive, default=100,
+                               help="number of records, or of days for 'sales' (default 100)")
     export_parser.add_argument("--locale", default="en_US", help="Faker locale (default en_US)")
     export_parser.add_argument("--format", choices=FORMATS, default="csv", help="output format (default csv)")
     export_parser.add_argument("-o", "--output", help="output file (default: standard output)")
@@ -238,6 +166,15 @@ def build_parser() -> argparse.ArgumentParser:
                                help="baskets per customer, for 'customers' (default 10)")
     export_parser.add_argument("--csv-safe", action="store_true",
                                help="quote text cells starting with = + - @ (spreadsheet formula injection)")
+    export_parser.add_argument("--diet", choices=[*DIETS, "random"],
+                               help="only products fitting this diet (baskets, receipts, customers, products); "
+                                    "'random': a few customers follow one")
+    export_parser.add_argument("--start", type=datetime.date.fromisoformat,
+                               help="first day, YYYY-MM-DD, for 'sales' (default: January 1st of this year)")
+    export_parser.add_argument("--by", choices=SALES_GROUPINGS, default="department",
+                               help="sales grouping, for 'sales' (default department)")
+    export_parser.add_argument("--baskets-per-day", type=_positive, default=1000,
+                               help="store traffic on an average day, for 'sales' (default 1000)")
     return parser
 
 
@@ -248,15 +185,24 @@ def _check_locale(parser: argparse.ArgumentParser, locale: str) -> None:
         parser.error(f"unknown Faker locale: {locale!r}{hint}")
 
 
+def _options(args: argparse.Namespace) -> dict[str, Any]:
+    return {"diet": args.diet, "start": args.start, "by": args.by, "baskets_per_day": args.baskets_per_day}
+
+
 def _export_to_file(args: argparse.Namespace) -> int:
     """Write to a temporary file in the destination directory, renamed to
     the destination only once the export is complete."""
     path = os.path.abspath(args.output)
     descriptor, temporary = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".faker-grocery-", suffix=".tmp")
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as out:
-            written = export(args.kind, args.count, args.locale, args.format, out, args.seed, args.trips,
-                             args.csv_safe)
+        if args.format == "parquet":
+            os.close(descriptor)
+            written = export_parquet(args.kind, args.count, args.locale, temporary, args.seed, args.trips,
+                                     **_options(args))
+        else:
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as out:
+                written = export(args.kind, args.count, args.locale, args.format, out, args.seed, args.trips,
+                                 args.csv_safe, **_options(args))
         os.chmod(temporary, 0o666 & ~_umask())
         os.replace(temporary, path)
     except BaseException:
@@ -284,14 +230,20 @@ def main(argv: list[str] | None = None) -> int:
     for locale in locales:
         _check_locale(parser, locale)
     if args.command == "export":
+        if args.format == "parquet" and not args.output:
+            parser.error("--format parquet needs an output file (-o FILE)")
+        if args.diet == "random" and args.kind != "customers":
+            parser.error("--diet random only applies to customers")
+        if args.diet and args.kind == "sales":
+            parser.error("--diet does not apply to sales")
         try:
             if args.output:
                 written = _export_to_file(args)
-                unit = "rows" if args.format == "csv" else "records"
+                unit = "rows" if args.format in ("csv", "parquet") or args.kind == "sales" else "records"
                 print(f"Wrote {written} {unit} to {args.output}", file=sys.stderr)
             else:
                 export(args.kind, args.count, args.locale, args.format, sys.stdout, args.seed, args.trips,
-                       args.csv_safe)
+                       args.csv_safe, **_options(args))
                 # Flush here: a small output is still buffered, and a broken
                 # pipe would otherwise only surface at interpreter exit.
                 sys.stdout.flush()
@@ -300,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             # Point stdout at devnull so the interpreter's final flush is quiet.
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
             return 0
-        except OSError as error:
+        except (OSError, ImportError) as error:
             print(f"faker-grocery: error: {error}", file=sys.stderr)
             return 1
         except KeyboardInterrupt:

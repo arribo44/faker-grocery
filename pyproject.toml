@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "jctranc" }]
-keywords = ["faker", "grocery", "supermarket", "hypermarket", "test data"]
+keywords = ["faker", "grocery", "supermarket", "hypermarket", "test data", "sales", "time series", "pandas"]
 requires-python = ">=3.11"
 dependencies = ["faker>=20.0.0"]
 classifiers = [
@@ -26,8 +26,10 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+# pandas DataFrames (faker_grocery.export.to_dataframe) and Parquet export.
+data = ["pandas>=2.0", "pyarrow>=14"]
 test = ["pytest", "hypothesis"]
-dev = ["pytest", "hypothesis", "ruff", "build", "mypy", "pip-audit"]
+dev = ["faker-grocery[data]", "pytest", "hypothesis", "ruff", "build", "mypy", "pip-audit"]
 
 [project.scripts]
 faker-grocery = "faker_grocery.__main__:main"
@@ -57,7 +59,7 @@ warn_return_any = false
 
 [[tool.mypy.overrides]]
 # Faker ships no type information for some of its modules.
-module = ["faker.*"]
+module = ["faker.*", "pandas.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.ruff]
