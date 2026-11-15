@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `faker-grocery --locale fr_FR` (or `-l fr_FR`, `python -m faker_grocery --local fr_FR`) runs the demo for that locale, without the `demo` subcommand; repeatable.
 - `faker-grocery export --csv-safe`: prefixes text cells starting with `=`, `+`, `-`, `@` (or a tab / carriage return) with `'` against spreadsheet formula injection. Off by default, since it also changes promotion labels such as `-30 %`.
 - Property-based tests (`tests/test_properties.py`, hypothesis): valid EAN-13s, basket item counts and totals, receipt subtotal / discounts / taxes / total / change, product record consistency, for any seed over 8 locales (EUR, USD sales tax, JPY, BHD...). `hypothesis` joins the `test` extra.
 - `scripts/build_order_stats.py` checks the SHA-256 of the raw Instacart files (from a third-party mirror) before building; `--no-verify` skips it.

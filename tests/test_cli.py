@@ -131,6 +131,19 @@ class TestMain(unittest.TestCase):
             self.assertEqual(main(["demo", "--locale", "es_ES"]), 0)
         self.assertIn("Demo (es_ES)", out.getvalue())
 
+    def test_locale_without_demo_subcommand(self):
+        for argv in (["--locale", "fr_FR"], ["--local", "fr_FR"], ["-l", "fr_FR"]):
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(main(argv), 0)
+            self.assertIn("Demo (fr_FR)", out.getvalue())
+            self.assertNotIn("Demo (en_US)", out.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            main(["-l", "it_IT", "-l", "de_DE"])
+        self.assertIn("Demo (it_IT)", out.getvalue())
+        self.assertIn("Demo (de_DE)", out.getvalue())
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            main(["--locale", "xx_XX"])
+
     def test_invalid_arguments_exit(self):
         for argv in (["export", "baskets", "-n", "0"], ["export", "nope"], ["export", "baskets", "--format", "xml"]):
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):

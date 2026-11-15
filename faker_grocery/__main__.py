@@ -4,6 +4,7 @@ Command line for faker_grocery: `python -m faker_grocery` (or the
 
     faker-grocery                          # demo (en_US and fr_FR)
     faker-grocery demo --locale de_DE      # demo for one locale
+    faker-grocery --locale fr_FR           # same, without "demo" (or -l fr_FR)
     faker-grocery export baskets -n 1000 --locale fr_FR --format csv -o baskets.csv
     faker-grocery export receipts -n 500 --format jsonl --seed 42
     faker-grocery export customers -n 50 --trips 12 --format csv
@@ -219,6 +220,10 @@ def _positive(value: str) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="faker-grocery", description="Fake supermarket data: demo or bulk export.")
+    # `faker-grocery --locale fr_FR` = `faker-grocery demo --locale fr_FR`
+    # (argparse also accepts the unambiguous prefix `--local`).
+    parser.add_argument("-l", "--locale", action="append", dest="main_locales", metavar="LOCALE",
+                        help="demo for this Faker locale (repeatable; default: en_US and fr_FR)")
     commands = parser.add_subparsers(dest="command")
     demo_parser = commands.add_parser("demo", help="print examples of every generator")
     demo_parser.add_argument("--locale", action="append", help="Faker locale (repeatable; default: en_US and fr_FR)")
@@ -270,7 +275,10 @@ def _umask() -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    locales = args.locale if args.command == "demo" and args.locale else ["en_US", "fr_FR"]
+    if args.command == "export" and args.main_locales:
+        parser.error("put --locale after 'export': faker-grocery export KIND --locale LOCALE")
+    demo_locales = args.locale if args.command == "demo" else None
+    locales = demo_locales or args.main_locales or ["en_US", "fr_FR"]
     if args.command == "export":
         locales = [args.locale]
     for locale in locales:

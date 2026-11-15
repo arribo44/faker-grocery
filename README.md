@@ -436,6 +436,7 @@ The package installs a `faker-grocery` command (also `python -m faker_grocery`):
 ```bash
 faker-grocery                                    # demo, en_US and fr_FR
 faker-grocery demo --locale de_DE                # demo for one locale
+faker-grocery --locale fr_FR                     # same, without "demo" (also -l fr_FR)
 
 # Bulk export: baskets, receipts, customers (with their shopping history) or products
 faker-grocery export baskets -n 10000 --locale fr_FR --format csv -o baskets.csv
