@@ -6,6 +6,8 @@ import csv
 import io
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -125,6 +127,35 @@ class TestMain(unittest.TestCase):
             self.assertEqual(os.listdir(directory), ["out.csv"])
             with open(path, encoding="utf-8") as f:
                 self.assertEqual(f.read(), "previous\n")
+
+    def test_closed_pipe_is_quiet(self):
+        # `faker-grocery export ... | head -1` with an output larger than the
+        # pipe buffer: the write itself fails, during the export.
+        process = subprocess.Popen(
+            [sys.executable, "-m", "faker_grocery", "export", "receipts", "-n", "2000", "--format", "jsonl"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        process.stdout.readline()
+        process.stdout.close()
+        stderr = process.stderr.read().decode()
+        process.stderr.close()
+        self.assertEqual(process.wait(timeout=60), 0, msg=stderr)
+        self.assertNotIn("BrokenPipeError", stderr)
+
+    def test_closed_pipe_on_final_flush_is_quiet(self):
+        # A small output is still buffered when the export ends: the broken
+        # pipe only shows on the flush, which must happen inside main().
+        class ClosedPipe(io.StringIO):
+            def flush(self):
+                raise BrokenPipeError(32, "Broken pipe")
+
+            def fileno(self):
+                return 1
+
+        with mock.patch("sys.stdout", ClosedPipe()), mock.patch("faker_grocery.__main__.os.dup2") as dup2, \
+                mock.patch("faker_grocery.__main__.os.open", return_value=99):
+            self.assertEqual(main(["export", "products", "-n", "2"]), 0)
+        dup2.assert_called_once_with(99, 1)
 
     def test_demo_runs(self):
         with contextlib.redirect_stdout(io.StringIO()) as out:
