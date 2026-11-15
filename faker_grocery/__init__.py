@@ -466,7 +466,7 @@ class GroceryStoreProvider(BaseProvider):
 
     def _warn_deprecated(self, name: str) -> None:
         warnings.warn(
-            f"GroceryStoreProvider.{name}() is deprecated and will be removed in a future version, "
+            f"GroceryStoreProvider.{name}() is deprecated and will be removed in 1.0, "
             f"use {self._DEPRECATED_ALIASES[name]}() instead (the old name clashes with Faker's "
             f"own address providers, e.g. administrative departments in fr_FR).",
             DeprecationWarning,

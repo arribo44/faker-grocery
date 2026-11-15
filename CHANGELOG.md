@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/build_order_stats.py` checks the SHA-256 of the raw Instacart files (from a third-party mirror) before building; `--no-verify` skips it.
 
 ### Changed
+- README: new **Stability and versioning** section (public API, same values for the same seed within a minor version, data files not public); the data layout is documented as internal; the data license section states that the original Instacart terms still apply to the catalog data, which the MIT License (code only) doesn't cover.
+- The deprecated `department()` / `department_name()` aliases now announce their removal in 1.0.
 - `faker-grocery export -o FILE` writes to a temporary file renamed once complete: a failed or interrupted export no longer leaves a half-written file (or destroys the previous one).
 - `--format json` is written record by record (same output as before) instead of building the whole list in memory.
 - CI / release: actions pinned by commit SHA (updated monthly by Dependabot), read-only default token, no persisted git credentials, new `pip-audit` job.
